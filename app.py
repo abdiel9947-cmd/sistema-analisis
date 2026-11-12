@@ -7,16 +7,15 @@ import requests
 # ==============================================================================
 st.set_page_config(page_title="Sistema Interno de Análisis Cuantitativo", page_icon="📊", layout="centered")
 
-# Pantalla de bloqueo
 st.sidebar.title("🔒 Acceso Restringido")
 access_code = st.sidebar.text_input("Ingrese código de operador:", type="password")
 
-if access_code != "CLAVE123":  # <--- CAMBIA ESTA CLAVE POR LA QUE TÚ QUIERAS
+if access_code != "CLAVE123":
     st.warning("Acceso denegado. Sistema reservado para personal autorizado.")
     st.stop()
 
 st.title("📊 Panel de Procesamiento de Datos Deportivos")
-st.markdown("**Instrucciones:** Suba los PDFs de estadísticas y los PDFs de cuotas de las casas de apuestas. El sistema extraerá y analizará toda la información automáticamente.")
+st.markdown("**Instrucciones:** Suba los PDFs de estadísticas y los PDFs de cuotas. El sistema extraerá y analizará toda la información automáticamente.")
 st.markdown("---")
 
 # ==============================================================================
@@ -92,33 +91,32 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
     if not stats_files or not odds_files:
         st.error("⚠️ Error: Debe subir al menos un PDF de estadísticas y al menos un PDF de cuotas.")
     else:
-        with st.spinner("Procesando datos y calculando probabilidades (esto puede tomar 5-10 segundos)..."):
+        with st.spinner("Procesando datos y calculando probabilidades..."):
             try:
-                # A. Leer el texto de los PDFs de estadísticas
                 stats_text = ""
                 for file in stats_files:
                     reader = PyPDF2.PdfReader(file)
                     for page in reader.pages:
                         stats_text += page.extract_text() + "\n"
                 
-                # B. Leer el texto de los PDFs de cuotas
                 odds_text = ""
                 for file in odds_files:
                     reader = PyPDF2.PdfReader(file)
                     for page in reader.pages:
                         odds_text += page.extract_text() + "\n"
                 
-                # C. CONFIGURACIÓN DE LA API GROQ
-                GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-                API_URL = "https://api.groq.com/openai/v1/chat/completions"
+                OR_API_KEY = st.secrets["OR_API_KEY"]
+                API_URL = "https://openrouter.ai/api/v1/chat/completions"
                 
                 headers = {
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
+                    "Authorization": f"Bearer {OR_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://tuempresa.com",
+                    "X-Title": "SistemaInterno"
                 }
                 
                 payload = {
-                    "model": "llama-3.1-70b-versatile",
+                    "model": "qwen/qwen-2.5-72b-instruct:free",
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": f"--- DATOS DE ESTADÍSTICAS ---\n{stats_text}\n\n--- DATOS DE CUOTAS ---\n{odds_text}"}
@@ -127,7 +125,6 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                     "max_tokens": 2000
                 }
                 
-                # D. Enviar solicitud
                 response = requests.post(API_URL, headers=headers, json=payload)
                 
                 if response.status_code == 200:
