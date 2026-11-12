@@ -12,15 +12,15 @@ if access_code != "CLAVE123":
     st.stop()
 
 st.title("📊 Panel de Procesamiento de Datos Deportivos")
-st.markdown("**Instrucciones:** Suba los archivos CSV. El sistema extraerá los datos y calculará el +EV.")
+st.markdown("**Instrucciones:** Pegue el resumen consolidado del partido en el cuadro de abajo. El sistema calculará el +EV automáticamente.")
 st.markdown("---")
 
-SYSTEM_PROMPT = """Eres un extractor de datos cuantitativos. Tu ÚNICA tarea es leer los datos CSV y devolver un objeto JSON válido. NO calcules nada, NO inventes datos.
+SYSTEM_PROMPT = """Eres un extractor de datos cuantitativos. Tu ÚNICA tarea es leer el texto y devolver un objeto JSON válido. NO calcules nada, NO inventes datos.
 
-Busca en los datos la probabilidad/frecuencia de un evento y la cuota decimal de ese mismo mercado.
+Busca en el texto la probabilidad/frecuencia de un evento y la cuota decimal de ese mismo mercado.
 Devuelve EXCLUSIVAMENTE este formato JSON (sin bloques de código markdown):
 {
-  "mercado": "Nombre del mercado (ej: Victoria Local)",
+  "mercado": "Nombre del mercado (ej: Victoria Local, Over 2.5 Goles)",
   "cuota": 2.05,
   "probabilidad_datos": 70.0,
   "evidencia_1": "Cita textual con el número",
@@ -30,72 +30,64 @@ Devuelve EXCLUSIVAMENTE este formato JSON (sin bloques de código markdown):
   "cancelar_si": "Condición para cancelar"
 }
 REGLAS:
-1. Si no hay cuota clara, devuelve: {"error": "No se encontraron cuotas válidas en los datos."}
+1. Si no hay cuota clara, devuelve: {"error": "No se encontraron cuotas válidas."}
 2. Si no hay datos estadísticos, devuelve: {"error": "Datos estadísticos insuficientes."}
 3. 'cuota' y 'probabilidad_datos' DEBEN ser números (float).
 """
 
-st.subheader("Carga de Archivos CSV")
-csv_files = st.file_uploader("Seleccionar archivos CSV", type="csv", accept_multiple_files=True)
+st.subheader("Pegue el Resumen Consolidado del Partido Aquí:")
+input_text = st.text_area(
+    "Resumen del partido:",
+    height=400,
+    placeholder="Pegue aquí el resumen completo con estadísticas, cuotas, H2H, forma reciente..."
+)
 
 if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
-    if not csv_files:
-        st.error("⚠️ Debe subir al menos un archivo CSV.")
+    if not input_text.strip():
+        st.error("⚠️ Debe pegar el texto del resumen.")
     else:
-        with st.spinner("Procesando archivos y calculando +EV..."):
+        with st.spinner("Extrayendo datos y calculando +EV..."):
             try:
-                combined_data = ""
-                for i, file in enumerate(csv_files, 1):
-                    try:
-                        df = pd.read_csv(file)
-                        combined_data += f"\n--- ARCHIVO {i}: {file.name} ---\n"
-                        combined_data += df.to_string(index=False)
-                    except Exception as e:
-                        st.warning(f"⚠️ Error al leer {file.name}: {str(e)}")
-
-                if len(combined_data.strip()) < 100:
-                    st.error("⚠️ Los archivos están vacíos o no son legibles.")
-                    st.stop()
-
-                # LLAMADA A OPENROUTER (Modelo permanente y gratuito, SIN 404)
-                url = "https://openrouter.ai/api/v1/chat/completions"
-                headers = {
-                    "Authorization": f"Bearer {st.secrets['OR_API_KEY']}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://sistema-interno.local",
-                    "X-Title": "SistemaInterno"
-                }
+                # LLAMADA A POLLINATIONS.AI (SIN API KEY, SIN REGISTRO)
+                url = "https://text.pollinations.ai/openai"
                 
                 payload = {
-                    "model": "meta-llama/llama-3-8b-instruct:free", # MODELO PERMANENTE Y ESTABLE
+                    "model": "openai",
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"--- DATOS ---\n{combined_data[:40000]}"}
+                        {"role": "user", "content": f"--- TEXTO A ANALIZAR ---\n{input_text[:40000]}"}
                     ],
                     "temperature": 0.0,
-                    "max_tokens": 1000
+                    "max_tokens": 1000,
+                    "seed": 42
                 }
                 
-                response = requests.post(url, headers=headers, json=payload, timeout=60)
+                headers = {"Content-Type": "application/json"}
+                response = requests.post(url, headers=headers, json=payload, timeout=120)
                 
                 if response.status_code != 200:
-                    st.error(f"⚠️ Error de conexión: {response.status_code}. Reintente.")
+                    st.error(f"⚠️ Error de conexión (código {response.status_code}). Reintente en 30 segundos.")
                     st.stop()
 
                 raw_text = response.json()["choices"][0]["message"]["content"]
+                
+                if not raw_text or not raw_text.strip():
+                    st.error("⚠️ El motor no devolvió datos. Reintente.")
+                    st.stop()
+
                 clean_json = raw_text.replace("```json", "").replace("```", "").strip()
                 
                 try:
                     data = json.loads(clean_json)
                 except json.JSONDecodeError:
-                    st.error("⚠️ No se pudo estructurar el JSON. Verifique que el CSV tenga datos claros.")
+                    st.error("⚠️ No se pudo estructurar el JSON. Verifique que el texto tenga cuotas y estadísticas claras.")
                     st.stop()
 
                 if "error" in data:
                     st.warning(f"⛔ NO APOSTAR. {data['error']} Preservar capital.")
                     st.stop()
 
-                # CÁLCULO MATEMÁTICO REAL (Python)
+                # CÁLCULO MATEMÁTICO REAL (Python puro)
                 cuota = float(data.get("cuota", 0))
                 prob_real = float(data.get("probabilidad_datos", 0))
 
@@ -131,7 +123,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                 st.markdown("---")
                 st.markdown(f"• ✅ **VALIDAR si:** {data.get('validar_si', 'N/A')}")
                 st.markdown(f"• ❌ **CANCELAR si:** {data.get('cancelar_si', 'N/A')}")
-                st.caption("Sistema v8.0 | Cálculos verificados por Python.")
+                st.caption("Sistema v10.0 | Motor Pollinations | Cálculos verificados por Python.")
 
             except Exception as e:
                 st.error(f"⚠️ Error: {type(e).__name__}: {str(e)}")
