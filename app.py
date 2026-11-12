@@ -1,6 +1,6 @@
 import json
 import streamlit as st
-from google import genai
+from openai import OpenAI
 
 # Configuración de la página
 st.set_page_config(
@@ -25,7 +25,8 @@ if not st.session_state.authenticated:
 # --- 2. INTERFAZ PRINCIPAL ---
 st.title("📈 Sistema Cuantitativo de Apuestas Deportivas (+EV)")
 st.markdown(
-    "Pega el resumen consolidado del partido para realizar la auditoría matemática y de 9 categorías."
+    "Pega el resumen consolidado del partido para realizar la auditoría"
+    " matemática y de 9 categorías."
 )
 
 texto_partido = st.text_area(
@@ -34,13 +35,12 @@ texto_partido = st.text_area(
     placeholder="Pega el texto aquí...",
 )
 
-# Prompt Maestro integrado como System Instructions para la IA
 SYSTEM_PROMPT = """
 Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant). Tu único objetivo es preservar el capital y encontrar Valor Esperado Positivo (+EV) matemáticamente demostrable. Tu tolerancia al riesgo es extremadamente baja.
 
 Analiza EXCLUSIVAMENTE los datos numéricos del texto proporcionado. PROHIBIDO usar conocimiento general, narrativas de "motivación", o inventar datos. Si un dato no está en el texto, el mercado correspondiente se descarta inmediatamente.
 
-Debes devolver la respuesta ÚNICAMENTE en formato JSON válido (sin bloques de texto extra markdown fuera del JSON si es posible, o asegúrate de que sea un JSON parseable) con esta estructura exacta:
+Debes devolver la respuesta ÚNICAMENTE en formato JSON válido con esta estructura exacta:
 
 {
   "auditoria_9_categorias": {
@@ -82,28 +82,25 @@ if st.button("Ejecutar Análisis Cuantitativo"):
     st.warning("Por favor, pega los datos del partido antes de analizar.")
   else:
     with st.spinner(
-        "Analizando datos numéricos y calculando Valor Esperado..."
+        "Analizando datos numéricos y calculando Valor Esperado con OpenAI..."
     ):
       try:
-        # Inicializar el cliente oficial de Google GenAI usando la API key de los secretos
-        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        # Cliente oficial de OpenAI de pago (Ultra estable)
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-        # Llamada al modelo más estable y rápido para texto y JSON estructurado
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=f"Analiza el siguiente texto de un partido:\n\n{texto_partido}",
-            config={
-                "system_instruction": SYSTEM_PROMPT,
-                "response_mime_type": "application/json",
-            },
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": texto_partido},
+            ],
+            response_format={"type": "json_object"},
         )
 
-        # Parsear el JSON devuelto
-        resultado_json = json.loads(response.text)
+        resultado_json = json.loads(response.choices[0].message.content)
 
         st.success("¡Análisis completado con éxito!")
 
-        # Mostrar Veredicto Final
         veredicto = resultado_json.get("veredicto_final", "NO APOSTAR")
         if veredicto == "APOSTAR":
           st.error(f"🟢 VEREDICTO: {veredicto}")
@@ -114,7 +111,6 @@ if st.button("Ejecutar Análisis Cuantitativo"):
             f"**Gestión de Bankroll / Mensaje:** {resultado_json.get('mensaje_preservacion', '')}"
         )
 
-        # Pestañas para organizar la visualización
         tab1, tab2 = st.tabs(
             ["📊 Oportunidades +EV", "📋 Auditoría de 9 Categorías"]
         )
