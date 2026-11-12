@@ -83,7 +83,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
 
                 # B. Configurar Gemini
                 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                model = genai.GenerativeModel("gemini-1.5-flash-latest")
                 
                 prompt_completo = f"{SYSTEM_PROMPT}\n\n--- DATOS COMBINADOS ---\n{combined_data}"
                 
