@@ -119,28 +119,28 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
 """
                 
                 # D. CONFIGURACIÓN DE LA API GRATUITA
-                HF_TOKEN = st.secrets["HF_TOKEN"]  # <--- PEGA TU TOKEN DE HUGGING FACE AQUÍ
-                API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-32B-Instruct"
-                
-                headers = {
-                    "Authorization": f"Bearer {HF_TOKEN}",
-                    "Content-Type": "application/json"
-                }
-                
-                payload = {
-                    "inputs": mensaje_final,
-                    "parameters": {
-                        "max_new_tokens": 2000,
-                        "temperature": 0.1,
-                        "return_full_text": False
-                    }
-                }
-                
-                # E. Enviar solicitud
-                response = requests.post(API_URL, headers=headers, json=payload)
-                
-                if response.status_code == 200:
-                    resultado = response.json()[0]["generated_text"]
+                GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+headers = {
+    "Authorization": f"Bearer {GROQ_API_KEY}",
+    "Content-Type": "application/json"
+}
+
+payload = {
+    "model": "llama-3.3-70b-versatile",
+    "messages": [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"--- DATOS DE ESTADÍSTICAS ---\n{stats_text}\n\n--- DATOS DE CUOTAS ---\n{odds_text}"}
+    ],
+    "temperature": 0.1,
+    "max_tokens": 2000
+}
+
+response = requests.post(API_URL, headers=headers, json=payload)
+
+if response.status_code == 200:
+    resultado = response.json()["choices"][0]["message"]["content"]
                     st.success("✅ Análisis completado exitosamente.")
                     st.markdown("---")
                     st.markdown(resultado)
