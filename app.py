@@ -116,7 +116,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                 }
                 
                 payload = {
-                    "model": "qwen/qwen-2.5-72b-instruct:free",
+                    "model": "openrouter/free",  # <--- SOLUCIÓN DEFINITIVA: Enrutador gratuito permanente
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": f"--- DATOS DE ESTADÍSTICAS ---\n{stats_text}\n\n--- DATOS DE CUOTAS ---\n{odds_text}"}
