@@ -20,7 +20,7 @@ st.markdown("**Instrucciones:** Suba los PDFs de estadísticas y los PDFs de cuo
 st.markdown("---")
 
 # ==============================================================================
-# 2. EL CEREBRO OCULTO (PROMPT AJUSTADO PARA EXTRAER CUOTAS DE PDFs)
+# 2. EL CEREBRO OCULTO (PROMPT)
 # ==============================================================================
 SYSTEM_PROMPT = """
 Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant). Tu único objetivo es preservar el capital y encontrar Valor Esperado Positivo (+EV) matemáticamente demostrable. Tu tolerancia al riesgo es extremadamente baja.
@@ -92,7 +92,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
     if not stats_files or not odds_files:
         st.error("⚠️ Error: Debe subir al menos un PDF de estadísticas y al menos un PDF de cuotas.")
     else:
-        with st.spinner("Procesando datos y calculando probabilidades (esto puede tomar 15-30 segundos)..."):
+        with st.spinner("Procesando datos y calculando probabilidades (esto puede tomar 5-10 segundos)..."):
             try:
                 # A. Leer el texto de los PDFs de estadísticas
                 stats_text = ""
@@ -108,48 +108,37 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                     for page in reader.pages:
                         odds_text += page.extract_text() + "\n"
                 
-                # C. Unir Prompt + Datos
-                mensaje_final = f"""{SYSTEM_PROMPT}
-
---- DATOS DE ESTADÍSTICAS (PDFs de Flashscore, Sofascore, etc.) ---
-{stats_text}
-
---- DATOS DE CUOTAS (PDFs de Casas de Apuestas) ---
-{odds_text}
-"""
-                
-                # D. CONFIGURACIÓN DE LA API GRATUITA
+                # C. CONFIGURACIÓN DE LA API GROQ
                 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
-
-headers = {
-    "Authorization": f"Bearer {GROQ_API_KEY}",
-    "Content-Type": "application/json"
-}
-
-payload = {
-    "model": "llama-3.3-70b-versatile",
-    "messages": [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"--- DATOS DE ESTADÍSTICAS ---\n{stats_text}\n\n--- DATOS DE CUOTAS ---\n{odds_text}"}
-    ],
-    "temperature": 0.1,
-    "max_tokens": 2000
-}
-
-response = requests.post(API_URL, headers=headers, json=payload)
-
-if response.status_code == 200:
-    resultado = response.json()["choices"][0]["message"]["content"]
+                API_URL = "https://api.groq.com/openai/v1/chat/completions"
+                
+                headers = {
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                
+                payload = {
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": f"--- DATOS DE ESTADÍSTICAS ---\n{stats_text}\n\n--- DATOS DE CUOTAS ---\n{odds_text}"}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 2000
+                }
+                
+                # D. Enviar solicitud
+                response = requests.post(API_URL, headers=headers, json=payload)
+                
+                if response.status_code == 200:
+                    resultado = response.json()["choices"][0]["message"]["content"]
                     st.success("✅ Análisis completado exitosamente.")
                     st.markdown("---")
                     st.markdown(resultado)
                     st.markdown("---")
                     st.caption("Sistema Interno de Análisis Cuantitativo v1.0 | Uso exclusivo.")
-                elif response.status_code == 503:
-                    st.warning("⚠️ El modelo gratuito está cargando en el servidor. Por favor, espera 20 segundos y vuelve a hacer clic en 'Ejecutar'.")
                 else:
-                    st.error(f"Error del servidor: {response.status_code}. Verifica que tu Token de Hugging Face sea correcto.")
+                    st.error(f"Error del servidor: {response.status_code}. Detalles: {response.text}")
 
             except Exception as e:
                 st.error(f"Error en el sistema: {str(e)}.")
