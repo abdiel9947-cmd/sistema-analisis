@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
+import requests
 import json
-import io
 
 # ==============================================================================
 # 1. INTERFAZ
@@ -13,11 +12,11 @@ st.sidebar.title("🔒 Acceso Restringido")
 access_code = st.sidebar.text_input("Ingrese código de operador:", type="password")
 
 if access_code != "CLAVE123":
-    st.warning("Acceso denegado.")
+    st.warning("Acceso denegido.")
     st.stop()
 
 st.title("📊 Panel de Procesamiento de Datos Deportivos")
-st.markdown("**Instrucciones:** Suba los archivos CSV descargados con Instant Data Scraper desde las páginas web de estadísticas y cuotas. El sistema procesará toda la información automáticamente.")
+st.markdown("**Instrucciones:** Suba los archivos CSV descargados con Instant Data Scraper. El sistema procesará toda la información automáticamente.")
 st.markdown("---")
 
 # ==============================================================================
@@ -55,7 +54,7 @@ st.markdown("Suba todos los archivos CSV descargados con Instant Data Scraper (e
 csv_files = st.file_uploader("Seleccionar archivos CSV", type="csv", accept_multiple_files=True)
 
 # ==============================================================================
-# 4. PROCESAMIENTO CON GEMINI (ESTABLE Y GRATUITO)
+# 4. PROCESAMIENTO CON POLLINATIONS.AI (100% GRATIS, SIN API KEY)
 # ==============================================================================
 if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
     if not csv_files:
@@ -79,24 +78,31 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                     st.stop()
 
                 # Recorte de seguridad
-                combined_data = combined_data[:50000]
+                combined_data = combined_data[:40000]
 
-                # B. Configurar Gemini
-                genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                model = genai.GenerativeModel("gemini-pro")
+                # B. LLAMADA A POLLINATIONS.AI (SIN API KEY, SIN REGISTRO)
+                url = "https://text.pollinations.ai/openai"
                 
-                prompt_completo = f"{SYSTEM_PROMPT}\n\n--- DATOS COMBINADOS ---\n{combined_data}"
+                payload = {
+                    "model": "openai",
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": f"--- DATOS COMBINADOS ---\n{combined_data}"}
+                    ],
+                    "temperature": 0.0,
+                    "max_tokens": 1000,
+                    "seed": 42
+                }
                 
-                response = model.generate_content(
-                    prompt_completo,
-                    generation_config=genai.GenerationConfig(
-                        temperature=0.0,
-                        max_output_tokens=1000,
-                        response_mime_type="application/json"
-                    )
-                )
+                headers = {"Content-Type": "application/json"}
+                
+                response = requests.post(url, headers=headers, json=payload, timeout=120)
+                
+                if response.status_code != 200:
+                    st.error(f"⚠️ Error de conexión: {response.status_code}. Reintente en unos segundos.")
+                    st.stop()
 
-                raw_text = response.text
+                raw_text = response.json()["choices"][0]["message"]["content"]
                 
                 if not raw_text or not raw_text.strip():
                     st.error("⚠️ El motor no devolvió datos. Reintente en unos segundos.")
@@ -162,7 +168,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                 st.markdown(f"• ❌ **CANCELAR INMEDIATAMENTE si:** {data.get('cancelar_si', 'Movimiento brusco de cuota')}")
                 
                 st.markdown("---")
-                st.caption("Sistema Interno de Análisis Cuantitativo v5.0 | Motor Gemini | Cálculos verificados por Python.")
+                st.caption("Sistema Interno de Análisis Cuantitativo v6.0 | Motor Pollinations | Cálculos verificados por Python.")
 
             except Exception as e:
                 st.error(f"⚠️ Error en el sistema: {type(e).__name__}: {str(e)}")
