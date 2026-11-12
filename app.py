@@ -11,17 +11,17 @@ if access_code != "CLAVE123":
     st.stop()
 
 st.title("📊 Panel de Procesamiento de Datos Deportivos")
-st.markdown("**Instrucciones:** Pegue el resumen consolidado del partido. El sistema auditará 9 categorías y calculará el +EV de las mejores oportunidades.")
+st.markdown("**Instrucciones:** Pegue el resumen consolidado del partido. El sistema auditará 9 categorías y buscará hasta 3 oportunidades de +EV.")
 st.markdown("---")
 
 # ==============================================================================
-# PROMPT MAESTRO RESTAURADO (5 PASOS + 9 CATEGORÍAS)
+# PROMPT EXHAUSTIVO ORIGINAL (RESTAURADO Y OPTIMIZADO PARA JSON)
 # ==============================================================================
 SYSTEM_PROMPT = """Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant). Tu único objetivo es preservar el capital y encontrar Valor Esperado Positivo (+EV) matemáticamente demostrable. Tu tolerancia al riesgo es extremadamente baja.
 
 Analizarás EXCLUSIVAMENTE los datos numéricos del texto adjunto. PROHIBIDO usar conocimiento general, narrativas de "motivación", o inventar datos. Si un dato no está en el texto, el mercado correspondiente se descarta inmediatamente.
 
-Aplica el siguiente ALGORITMO y devuelve EXCLUSIVAMENTE este formato JSON (sin bloques de código markdown):
+Aplica el siguiente ALGORITMO y devuelve EXCLUSIVAMENTE este formato JSON (sin bloques de código markdown, solo el JSON puro):
 {
   "auditoria_9_categorias": {
     "1_Principales": "DATOS SUFICIENTES" o "INSUFICIENTES. MERCADO DESCARTADO",
@@ -36,9 +36,9 @@ Aplica el siguiente ALGORITMO y devuelve EXCLUSIVAMENTE este formato JSON (sin b
   },
   "oportunidades": [
     {
-      "mercado": "Nombre exacto del mercado",
-      "cuota": 1.50,
-      "probabilidad_real": 75.0,
+      "mercado": "Nombre exacto del mercado (ej: Victoria Local, Over 2.5 Goles)",
+      "cuota": 2.05,
+      "probabilidad_datos": 70.0,
       "margen_ev": 12.5,
       "evidencia_1": "Cita textual exacta con el número",
       "evidencia_2": "Segunda cita textual exacta",
@@ -53,7 +53,7 @@ Aplica el siguiente ALGORITMO y devuelve EXCLUSIVAMENTE este formato JSON (sin b
 
 REGLAS INQUEBRANTABLES:
 1. La lista "oportunidades" debe contener 1, 2 o 3 mercados sólidos que hayan pasado la auditoría y tengan un margen EV > 5%. Si no hay ninguno, deja la lista vacía [] y pon veredicto "NO APOSTAR".
-2. Los valores de 'cuota', 'probabilidad_real' y 'margen_ev' DEBEN ser números (float), no texto.
+2. Los valores de 'cuota', 'probabilidad_datos' y 'margen_ev' DEBEN ser números (float), no texto.
 3. Cero Alucinaciones: Si el texto dice "UNLOCK" o "PREMIUM", asume que el dato es NO DISPONIBLE.
 4. Matemáticas sobre Narrativa: Ignora frases como "necesitan ganar".
 """
@@ -71,16 +71,18 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
     else:
         with st.spinner("Auditoría de 9 categorías y cálculo de +EV en curso..."):
             try:
-                # LLAMADA A POLLINATIONS.AI (Estable, sin API Key)
+                # ==============================================================================
+                # LLAMADA A POLLINATIONS.AI (SIN CLAVES, SIN REGISTRO, MODELO ESTABLE)
+                # ==============================================================================
                 url = "https://text.pollinations.ai/openai"
                 payload = {
-                    "model": "openai",
+                    "model": "llama",  # <--- ESTE ES EL MODELO QUE FUNCIONA SIN ERROR 400
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": f"--- TEXTO A ANALIZAR ---\n{input_text[:45000]}"}
                     ],
                     "temperature": 0.0,
-                    "max_tokens": 2000,
+                    "max_tokens": 2500,
                     "seed": 42
                 }
                 
@@ -106,7 +108,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
                     st.stop()
 
                 # ==============================================================================
-                # RENDERIZADO DE LA INTERFAZ (RESTAURANDO TU DISEÑO ORIGINAL)
+                # RENDERIZADO DE LA INTERFAZ (PROMPT EXHAUSTIVO DE 5 PASOS)
                 # ==============================================================================
                 st.success("✅ Análisis Cuantitativo Completado")
                 st.markdown("---")
@@ -117,7 +119,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
                 cols = st.columns(3)
                 for i, (cat, status) in enumerate(audit.items()):
                     with cols[i % 3]:
-                        if "INSUFICIENTES" in status:
+                        if "INSUFICIENTES" in str(status):
                             st.markdown(f"🔴 **{cat}:** {status}")
                         else:
                             st.markdown(f"🟢 **{cat}:** {status}")
@@ -136,7 +138,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
                         st.markdown(f"#### 🎯 Oportunidad #{i}: **{opp.get('mercado', 'No especificado')}**")
                         
                         cuota = float(opp.get("cuota", 0))
-                        prob_real = float(opp.get("probabilidad_real", 0))
+                        prob_real = float(opp.get("probabilidad_datos", 0))
                         ev = float(opp.get("margen_ev", 0))
                         prob_implicada = (1 / cuota) * 100 if cuota > 0 else 0
                         
@@ -159,7 +161,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
                         st.markdown(f"• ❌ **CANCELAR si:** {opp.get('cancelar_si', 'Movimiento brusco de cuota')}")
                         st.markdown("---")
 
-                st.caption("Sistema Interno de Análisis Cuantitativo v12.0 | Algoritmo de 5 pasos restaurado | Cálculos verificados por Python.")
+                st.caption("Sistema Interno de Análisis Cuantitativo v12.1 | Algoritmo de 5 pasos restaurado | Motor Pollinations (llama) | Cálculos verificados por Python.")
 
             except Exception as e:
                 st.error(f"⚠️ Error en el sistema: {type(e).__name__}: {str(e)}")
