@@ -15,7 +15,7 @@ st.markdown("**Instrucciones:** Pegue el resumen consolidado del partido. El sis
 st.markdown("---")
 
 # ==============================================================================
-# PROMPT EXHAUSTIVO ORIGINAL (RESTAURADO Y OPTIMIZADO PARA JSON)
+# PROMPT EXHAUSTIVO ORIGINAL (RESTAURADO)
 # ==============================================================================
 SYSTEM_PROMPT = """Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant). Tu único objetivo es preservar el capital y encontrar Valor Esperado Positivo (+EV) matemáticamente demostrable. Tu tolerancia al riesgo es extremadamente baja.
 
@@ -72,17 +72,16 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
         with st.spinner("Auditoría de 9 categorías y cálculo de +EV en curso..."):
             try:
                 # ==============================================================================
-                # LLAMADA A POLLINATIONS.AI (SIN CLAVES, SIN REGISTRO, MODELO ESTABLE)
+                # LLAMADA A POLLINATIONS.AI (SIN CLAVES, SIN REGISTRO, ENDPOINT CORRECTO)
                 # ==============================================================================
-                url = "https://text.pollinations.ai/openai"
+                url = "https://text.pollinations.ai/"
                 payload = {
-                    "model": "llama",  # <--- ESTE ES EL MODELO QUE FUNCIONA SIN ERROR 400
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"--- TEXTO A ANALIZAR ---\n{input_text[:45000]}"}
+                        {"role": "user", "content": f"--- TEXTO A ANALIZAR ---\n{input_text[:40000]}"}
                     ],
-                    "temperature": 0.0,
-                    "max_tokens": 2500,
+                    "model": "meta-llama/llama-3.3-70b-instruct",
+                    "json": True,  # <--- ESTO FUERZA LA SALIDA EN FORMATO JSON VÁLIDO
                     "seed": 42
                 }
                 
@@ -93,12 +92,13 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
                     st.error(f"⚠️ Error de conexión (código {response.status_code}). Reintente en 30 segundos.")
                     st.stop()
 
-                raw_text = response.json()["choices"][0]["message"]["content"]
+                raw_text = response.text
                 
                 if not raw_text or not raw_text.strip():
                     st.error("⚠️ El motor no devolvió datos. Reintente.")
                     st.stop()
 
+                # Limpieza y parseo del JSON
                 clean_json = raw_text.replace("```json", "").replace("```", "").strip()
                 
                 try:
@@ -161,7 +161,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
                         st.markdown(f"• ❌ **CANCELAR si:** {opp.get('cancelar_si', 'Movimiento brusco de cuota')}")
                         st.markdown("---")
 
-                st.caption("Sistema Interno de Análisis Cuantitativo v12.1 | Algoritmo de 5 pasos restaurado | Motor Pollinations (llama) | Cálculos verificados por Python.")
+                st.caption("Sistema Interno de Análisis Cuantitativo v13.0 | Algoritmo de 5 pasos restaurado | Motor Pollinations (Gratis, sin claves) | Cálculos verificados por Python.")
 
             except Exception as e:
                 st.error(f"⚠️ Error en el sistema: {type(e).__name__}: {str(e)}")
