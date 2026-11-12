@@ -1,6 +1,8 @@
 import streamlit as st
+import pandas as pd
 import google.generativeai as genai
 import json
+import io
 
 # ==============================================================================
 # 1. INTERFAZ
@@ -15,23 +17,23 @@ if access_code != "CLAVE123":
     st.stop()
 
 st.title("📊 Panel de Procesamiento de Datos Deportivos")
-st.markdown("**Instrucciones:** Copie el texto de las páginas web de estadísticas y cuotas, y péguelo en los campos correspondientes. El sistema calculará el Valor Esperado (+EV) de forma automática.")
+st.markdown("**Instrucciones:** Suba los archivos CSV descargados con Instant Data Scraper desde las páginas web de estadísticas y cuotas. El sistema procesará toda la información automáticamente.")
 st.markdown("---")
 
 # ==============================================================================
 # 2. PROMPT (SOLO EXTRACCIÓN, SIN CÁLCULOS)
 # ==============================================================================
-SYSTEM_PROMPT = """Eres un extractor de datos cuantitativos. Tu ÚNICA tarea es leer los textos adjuntos y devolver un objeto JSON válido. NO calcules nada, NO inventes datos, NO agregues texto fuera del JSON.
+SYSTEM_PROMPT = """Eres un extractor de datos cuantitativos. Tu ÚNICA tarea es leer los datos CSV adjuntos y devolver un objeto JSON válido. NO calcules nada, NO inventes datos, NO agregues texto fuera del JSON.
 
-Busca en los datos de estadísticas la probabilidad histórica o frecuencia de un evento (ej: "Over 2.5 goles: 65%").
-Busca en los datos de cuotas la cuota decimal de ese mismo mercado (ej: "1.85").
+Busca en los datos de estadísticas la probabilidad histórica o frecuencia de un evento (ej: porcentaje de victorias, goles promedio, etc.).
+Busca en los datos de cuotas la cuota decimal de ese mismo mercado (ej: 1.85, 2.05, etc.).
 
 Devuelve EXCLUSIVAMENTE este formato JSON (sin bloques de código markdown, solo el JSON puro):
 {
-  "mercado": "Nombre exacto del mercado",
-  "cuota": 1.85,
-  "probabilidad_pdf": 65.0,
-  "evidencia_1": "Cita textual exacta del texto de estadísticas con el número",
+  "mercado": "Nombre exacto del mercado (ej: Victoria Local, Over 2.5 Goles, BTTS)",
+  "cuota": 2.05,
+  "probabilidad_datos": 70.0,
+  "evidencia_1": "Cita textual exacta de los datos con el número",
   "evidencia_2": "Segunda cita textual exacta",
   "evidencia_3": "Tercera cita textual exacta",
   "validar_si": "Condición pre-partido para validar",
@@ -41,40 +43,49 @@ Devuelve EXCLUSIVAMENTE este formato JSON (sin bloques de código markdown, solo
 REGLAS ABSOLUTAS:
 1. Si no encuentras una cuota clara, devuelve: {"error": "No se encontraron cuotas válidas en los datos."}
 2. Si no encuentras datos estadísticos, devuelve: {"error": "Datos estadísticos insuficientes."}
-3. Los valores de 'cuota' y 'probabilidad_pdf' DEBEN ser números (float), no texto.
+3. Los valores de 'cuota' y 'probabilidad_datos' DEBEN ser números (float), no texto.
+4. Si hay múltiples mercados posibles, elige el que tenga mayor claridad en los datos.
 """
 
 # ==============================================================================
-# 3. FORMULARIO DE TEXTO (SIN PDFs)
+# 3. FORMULARIO DE CARGA MÚLTIPLE DE CSVs
 # ==============================================================================
-st.subheader("1. Datos de Estadísticas del Partido")
-st.markdown("Copie el texto de la página web (Flashscore, Sofascore, etc.) y péguelo aquí:")
-stats_text = st.text_area("Texto de estadísticas:", height=200, placeholder="Ej: Real Madrid vs Barcelona\nOver 2.5 Goles: 72%\nBTTS: 68%\nTiros a puerta promedio: 5.8...")
-
-st.markdown("---")
-
-st.subheader("2. Datos de Cuotas (Casas de Apuestas)")
-st.markdown("Copie el texto de la página web de la casa de apuestas y péguelo aquí:")
-odds_text = st.text_area("Texto de cuotas:", height=200, placeholder="Ej: Over 2.5 Goles: 1.85\nUnder 2.5 Goles: 1.95\nBTTS Sí: 1.72\nBTTS No: 2.10")
+st.subheader("Carga de Archivos CSV")
+st.markdown("Suba todos los archivos CSV descargados con Instant Data Scraper (estadísticas, cuotas, tablas, etc.):")
+csv_files = st.file_uploader("Seleccionar archivos CSV", type="csv", accept_multiple_files=True)
 
 # ==============================================================================
 # 4. PROCESAMIENTO CON GEMINI (ESTABLE Y GRATUITO)
 # ==============================================================================
 if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
-    if not stats_text.strip() or not odds_text.strip():
-        st.error("⚠️ Debe ingresar texto en ambos campos.")
+    if not csv_files:
+        st.error("⚠️ Debe subir al menos un archivo CSV.")
     else:
-        with st.spinner("Extrayendo datos y calculando Valor Esperado (+EV)..."):
+        with st.spinner("Procesando archivos y calculando Valor Esperado (+EV)..."):
             try:
-                # Recorte de seguridad
-                stats_text_clean = stats_text[:30000]
-                odds_text_clean = odds_text[:15000]
+                # A. Leer y combinar todos los CSVs
+                combined_data = ""
+                for i, file in enumerate(csv_files, 1):
+                    try:
+                        df = pd.read_csv(file)
+                        combined_data += f"\n\n--- ARCHIVO CSV {i}: {file.name} ---\n"
+                        combined_data += df.to_string(index=False)
+                    except Exception as e:
+                        st.warning(f"⚠️ Error al leer {file.name}: {str(e)}")
+                        continue
 
-                # Configurar Gemini
+                if len(combined_data.strip()) < 100:
+                    st.error("⚠️ Los archivos no contienen datos legibles. Verifique que sean CSV válidos.")
+                    st.stop()
+
+                # Recorte de seguridad
+                combined_data = combined_data[:50000]
+
+                # B. Configurar Gemini
                 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
                 model = genai.GenerativeModel("gemini-2.0-flash")
                 
-                prompt_completo = f"{SYSTEM_PROMPT}\n\n--- ESTADÍSTICAS ---\n{stats_text_clean}\n\n--- CUOTAS ---\n{odds_text_clean}"
+                prompt_completo = f"{SYSTEM_PROMPT}\n\n--- DATOS COMBINADOS ---\n{combined_data}"
                 
                 response = model.generate_content(
                     prompt_completo,
@@ -91,23 +102,23 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                     st.error("⚠️ El motor no devolvió datos. Reintente en unos segundos.")
                     st.stop()
 
-                # Limpieza y parseo
+                # C. Limpieza y parseo
                 clean_json = raw_text.replace("```json", "").replace("```", "").strip()
                 
                 try:
                     data = json.loads(clean_json)
                 except json.JSONDecodeError:
-                    st.error("⚠️ Los datos no pudieron estructurarse. Verifique que los textos contengan números y cuotas claros.")
+                    st.error("⚠️ Los datos no pudieron estructurarse. Verifique que los CSV contengan cuotas y estadísticas claras.")
                     st.stop()
 
                 if "error" in data:
                     st.warning(f"⛔ NO APOSTAR. {data['error']} Preservar capital.")
                     st.stop()
 
-                # CÁLCULO MATEMÁTICO REAL (Python puro, cero alucinación)
+                # D. CÁLCULO MATEMÁTICO REAL (Python puro, cero alucinación)
                 try:
                     cuota = float(data.get("cuota", 0))
-                    prob_real = float(data.get("probabilidad_pdf", 0))
+                    prob_real = float(data.get("probabilidad_datos", 0))
                 except (ValueError, TypeError):
                     st.error("⚠️ Los datos extraídos no son números válidos.")
                     st.stop()
@@ -121,7 +132,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                 ev = (prob_real_decimal * cuota) - 1.0
                 ev_porcentaje = ev * 100
 
-                # Informe Final
+                # E. Informe Final
                 st.success("✅ Análisis Cuantitativo Completado")
                 st.markdown("---")
                 
@@ -151,7 +162,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                 st.markdown(f"• ❌ **CANCELAR INMEDIATAMENTE si:** {data.get('cancelar_si', 'Movimiento brusco de cuota')}")
                 
                 st.markdown("---")
-                st.caption("Sistema Interno de Análisis Cuantitativo v4.0 | Motor Gemini | Cálculos verificados por Python.")
+                st.caption("Sistema Interno de Análisis Cuantitativo v5.0 | Motor Gemini | Cálculos verificados por Python.")
 
             except Exception as e:
                 st.error(f"⚠️ Error en el sistema: {type(e).__name__}: {str(e)}")
