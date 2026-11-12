@@ -90,7 +90,7 @@ if st.button("Ejecutar Análisis Cuantitativo"):
 
         # Llamada al modelo más estable y rápido para texto y JSON estructurado
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=f"Analiza el siguiente texto de un partido:\n\n{texto_partido}",
             config={
                 "system_instruction": SYSTEM_PROMPT,
