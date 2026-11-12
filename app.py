@@ -120,7 +120,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                 
                 # D. CONFIGURACIÓN DE LA API GRATUITA
                 HF_TOKEN = st.secrets["HF_TOKEN"]  # <--- PEGA TU TOKEN DE HUGGING FACE AQUÍ
-                API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-72B-Instruct"
+                API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-32B-Instruct"
                 
                 headers = {
                     "Authorization": f"Bearer {HF_TOKEN}",
