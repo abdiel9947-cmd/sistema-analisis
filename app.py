@@ -1,30 +1,50 @@
-import streamlit as st
-import requests
 import json
+import streamlit as st
+from google import genai
 
-st.set_page_config(page_title="Sistema Interno de Análisis Cuantitativo", page_icon="📊", layout="centered")
+# Configuración de la página
+st.set_page_config(
+    page_title="Quant Betting AI System", page_icon="📈", layout="wide"
+)
 
-st.sidebar.title("🔒 Acceso Restringido")
-access_code = st.sidebar.text_input("Ingrese código de operador:", type="password")
-if access_code != "CLAVE123":
-    st.warning("Acceso denegado.")
+# --- 1. PROTECCIÓN POR CONTRASEÑA ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 Acceso Restringido - Comunidad Suscriptores")
+    password_input = st.text_input("Introduce la contraseña:", type="password")
+    if st.button("Ingresar"):
+        if password_input == st.secrets.get("APP_PASSWORD", "admin123"):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
     st.stop()
 
-st.title("📊 Panel de Procesamiento de Datos Deportivos")
-st.markdown("**Instrucciones:** Pegue el resumen consolidado del partido. El sistema auditará 9 categorías y buscará hasta 3 oportunidades de +EV.")
-st.markdown("---")
+# --- 2. INTERFAZ PRINCIPAL ---
+st.title("📈 Sistema Cuantitativo de Apuestas Deportivas (+EV)")
+st.markdown(
+    "Pega el resumen consolidado del partido para realizar la auditoría matemática y de 9 categorías."
+)
 
-# ==============================================================================
-# PROMPT EXHAUSTIVO ORIGINAL (RESTAURADO)
-# ==============================================================================
-SYSTEM_PROMPT = """Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant). Tu único objetivo es preservar el capital y encontrar Valor Esperado Positivo (+EV) matemáticamente demostrable. Tu tolerancia al riesgo es extremadamente baja.
+texto_partido = st.text_area(
+    "Pega aquí los datos del partido (Estadísticas, H2H, Cuotas, etc.):",
+    height=250,
+    placeholder="Pega el texto aquí...",
+)
 
-Analizarás EXCLUSIVAMENTE los datos numéricos del texto adjunto. PROHIBIDO usar conocimiento general, narrativas de "motivación", o inventar datos. Si un dato no está en el texto, el mercado correspondiente se descarta inmediatamente.
+# Prompt Maestro integrado como System Instructions para la IA
+SYSTEM_PROMPT = """
+Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant). Tu único objetivo es preservar el capital y encontrar Valor Esperado Positivo (+EV) matemáticamente demostrable. Tu tolerancia al riesgo es extremadamente baja.
 
-Aplica el siguiente ALGORITMO y devuelve EXCLUSIVAMENTE este formato JSON (sin bloques de código markdown, solo el JSON puro):
+Analiza EXCLUSIVAMENTE los datos numéricos del texto proporcionado. PROHIBIDO usar conocimiento general, narrativas de "motivación", o inventar datos. Si un dato no está en el texto, el mercado correspondiente se descarta inmediatamente.
+
+Debes devolver la respuesta ÚNICAMENTE en formato JSON válido (sin bloques de texto extra markdown fuera del JSON si es posible, o asegúrate de que sea un JSON parseable) con esta estructura exacta:
+
 {
   "auditoria_9_categorias": {
-    "1_Principales": "DATOS SUFICIENTES" o "INSUFICIENTES. MERCADO DESCARTADO",
+    "1_Principales": "DATOS SUFICIENTES" o "DATOS INSUFICIENTES EN PDF. MERCADO DESCARTADO",
     "2_Goles": "...",
     "3_Jugadores": "...",
     "4_Disciplina": "...",
@@ -36,132 +56,98 @@ Aplica el siguiente ALGORITMO y devuelve EXCLUSIVAMENTE este formato JSON (sin b
   },
   "oportunidades": [
     {
-      "mercado": "Nombre exacto del mercado (ej: Victoria Local, Over 2.5 Goles)",
-      "cuota": 2.05,
-      "probabilidad_datos": 70.0,
-      "margen_ev": 12.5,
-      "evidencia_1": "Cita textual exacta con el número",
-      "evidencia_2": "Segunda cita textual exacta",
-      "evidencia_3": "Tercera cita textual exacta",
-      "validar_si": "Condición pre-partido para validar",
-      "cancelar_si": "Condición pre-partido para cancelar"
+      "mercado": "Nombre del mercado con +EV > 5%",
+      "cuota": 0.0,
+      "probabilidad_datos": 0.0,
+      "margen_ev": 0.0,
+      "evidencia_1": "Cita textual 1 con datos duros",
+      "evidencia_2": "Cita textual 2 con datos duros",
+      "evidencia_3": "Cita textual 3 con datos duros",
+      "validar_si": "Condición exacta pre-partido",
+      "cancelar_si": "Condición exacta para cancelar"
     }
   ],
   "veredicto_final": "APOSTAR" o "NO APOSTAR",
-  "mensaje_preservacion": "Mensaje final de recomendación"
+  "mensaje_preservacion": "Stake Fijo: 1% del Bankroll o mensaje de preservación si no hay valor."
 }
 
 REGLAS INQUEBRANTABLES:
-1. La lista "oportunidades" debe contener 1, 2 o 3 mercados sólidos que hayan pasado la auditoría y tengan un margen EV > 5%. Si no hay ninguno, deja la lista vacía [] y pon veredicto "NO APOSTAR".
-2. Los valores de 'cuota', 'probabilidad_datos' y 'margen_ev' DEBEN ser números (float), no texto.
-3. Cero Alucinaciones: Si el texto dice "UNLOCK" o "PREMIUM", asume que el dato es NO DISPONIBLE.
-4. Matemáticas sobre Narrativa: Ignora frases como "necesitan ganar".
+1. Cero Alucinaciones: Si dice "PREMIUM" o "UNLOCK", asume que el dato NO ESTÁ DISPONIBLE y descártalo.
+2. Si no hay ningún mercado con +EV > 5%, la lista 'oportunidades' debe ser [] y 'veredicto_final' debe ser "NO APOSTAR".
+3. Todos los valores numéricos de cuota, probabilidad y margen DEBEN ser float (números), no texto.
 """
 
-st.subheader("Pegue el Resumen Consolidado del Partido Aquí:")
-input_text = st.text_area(
-    "Resumen del partido (incluya estadísticas, cuotas, H2H, forma, etc.):",
-    height=400,
-    placeholder="Pegue aquí el resumen completo generado por IA con todos los datos del partido..."
-)
+if st.button("Ejecutar Análisis Cuantitativo"):
+  if not texto_partido.strip():
+    st.warning("Por favor, pega los datos del partido antes de analizar.")
+  else:
+    with st.spinner(
+        "Analizando datos numéricos y calculando Valor Esperado..."
+    ):
+      try:
+        # Inicializar el cliente oficial de Google GenAI usando la API key de los secretos
+        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO COMPLETO", type="primary"):
-    if not input_text.strip():
-        st.error("⚠️ Debe pegar el texto del resumen.")
-    else:
-        with st.spinner("Auditoría de 9 categorías y cálculo de +EV en curso..."):
-            try:
-                # ==============================================================================
-                # LLAMADA A POLLINATIONS.AI (SIN CLAVES, SIN REGISTRO, ENDPOINT CORRECTO)
-                # ==============================================================================
-                url = "https://text.pollinations.ai/"
-                payload = {
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"--- TEXTO A ANALIZAR ---\n{input_text[:40000]}"}
-                    ],
-                    "model": "meta-llama/llama-3.3-70b-instruct",
-                    "json": True,  # <--- ESTO FUERZA LA SALIDA EN FORMATO JSON VÁLIDO
-                    "seed": 42
-                }
-                
-                headers = {"Content-Type": "application/json"}
-                response = requests.post(url, headers=headers, json=payload, timeout=120)
-                
-                if response.status_code != 200:
-                    st.error(f"⚠️ Error de conexión (código {response.status_code}). Reintente en 30 segundos.")
-                    st.stop()
+        # Llamada al modelo más estable y rápido para texto y JSON estructurado
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=f"Analiza el siguiente texto de un partido:\n\n{texto_partido}",
+            config={
+                "system_instruction": SYSTEM_PROMPT,
+                "response_mime_type": "application/json",
+            },
+        )
 
-                raw_text = response.text
-                
-                if not raw_text or not raw_text.strip():
-                    st.error("⚠️ El motor no devolvió datos. Reintente.")
-                    st.stop()
+        # Parsear el JSON devuelto
+        resultado_json = json.loads(response.text)
 
-                # Limpieza y parseo del JSON
-                clean_json = raw_text.replace("```json", "").replace("```", "").strip()
-                
-                try:
-                    data = json.loads(clean_json)
-                except json.JSONDecodeError:
-                    st.error("⚠️ No se pudo estructurar el JSON. Verifique que el texto tenga datos claros.")
-                    st.stop()
+        st.success("¡Análisis completado con éxito!")
 
-                # ==============================================================================
-                # RENDERIZADO DE LA INTERFAZ (PROMPT EXHAUSTIVO DE 5 PASOS)
-                # ==============================================================================
-                st.success("✅ Análisis Cuantitativo Completado")
-                st.markdown("---")
-                
-                # PASO 1: AUDITORÍA
-                st.markdown("### 🛑 PASO 1: AUDITORÍA DE LAS 9 CATEGORÍAS")
-                audit = data.get("auditoria_9_categorias", {})
-                cols = st.columns(3)
-                for i, (cat, status) in enumerate(audit.items()):
-                    with cols[i % 3]:
-                        if "INSUFICIENTES" in str(status):
-                            st.markdown(f"🔴 **{cat}:** {status}")
-                        else:
-                            st.markdown(f"🟢 **{cat}:** {status}")
-                
-                st.markdown("---")
-                
-                # PASO 2 y 3: OPORTUNIDADES Y VEREDICTO
-                opps = data.get("oportunidades", [])
-                
-                if not opps or data.get("veredicto_final") == "NO APOSTAR":
-                    st.markdown("### ⛔ VEREDICTO FINAL: NO APOSTAR")
-                    st.warning(data.get("mensaje_preservacion", "Ningún mercado presenta un +EV matemático suficiente (>5%). Preservar capital."))
-                else:
-                    st.markdown("### 📊 PASO 2 y 3: OPORTUNIDADES DE +EV DETECTADAS")
-                    for i, opp in enumerate(opps, 1):
-                        st.markdown(f"#### 🎯 Oportunidad #{i}: **{opp.get('mercado', 'No especificado')}**")
-                        
-                        cuota = float(opp.get("cuota", 0))
-                        prob_real = float(opp.get("probabilidad_datos", 0))
-                        ev = float(opp.get("margen_ev", 0))
-                        prob_implicada = (1 / cuota) * 100 if cuota > 0 else 0
-                        
-                        st.markdown(f"💰 **Cuota:** {cuota} | 📊 **Prob. Implícita:** {prob_implicada:.1f}% | 🧠 **Prob. Real:** {prob_real}%")
-                        
-                        if ev > 5.0:
-                            st.markdown(f"### 🟢 **VALOR ESPERADO (+EV): +{ev:.2f}%** *(Oportunidad Matemática Detectada)*")
-                            st.markdown("⚖️ **Veredicto:** APOSTAR. Stake Fijo: 1% del Bankroll.")
-                        else:
-                            st.markdown(f"### 🟡 **VALOR ESPERADO (+EV): +{ev:.2f}%** *(Margen insuficiente)*")
-                            st.markdown("⚖️ **Veredicto:** NO APOSTAR.")
-                        
-                        st.markdown("**📈 Evidencia con Datos Duros:**")
-                        st.markdown(f"1. 📄 *\"{opp.get('evidencia_1', 'N/A')}\"*")
-                        st.markdown(f"2. 📄 *\"{opp.get('evidencia_2', 'N/A')}\"*")
-                        st.markdown(f"3. 📄 *\"{opp.get('evidencia_3', 'N/A')}\"*")
-                        
-                        st.markdown("**⚠️ Regla de la Hora (Kill Switch):**")
-                        st.markdown(f"• ✅ **VALIDAR si:** {opp.get('validar_si', 'Condiciones normales')}")
-                        st.markdown(f"• ❌ **CANCELAR si:** {opp.get('cancelar_si', 'Movimiento brusco de cuota')}")
-                        st.markdown("---")
+        # Mostrar Veredicto Final
+        veredicto = resultado_json.get("veredicto_final", "NO APOSTAR")
+        if veredicto == "APOSTAR":
+          st.error(f"🟢 VEREDICTO: {veredicto}")
+        else:
+          st.warning(f"🛑 VEREDICTO: {veredicto}")
 
-                st.caption("Sistema Interno de Análisis Cuantitativo v13.0 | Algoritmo de 5 pasos restaurado | Motor Pollinations (Gratis, sin claves) | Cálculos verificados por Python.")
+        st.info(
+            f"**Gestión de Bankroll / Mensaje:** {resultado_json.get('mensaje_preservacion', '')}"
+        )
 
-            except Exception as e:
-                st.error(f"⚠️ Error en el sistema: {type(e).__name__}: {str(e)}")
+        # Pestañas para organizar la visualización
+        tab1, tab2 = st.tabs(
+            ["📊 Oportunidades +EV", "📋 Auditoría de 9 Categorías"]
+        )
+
+        with tab1:
+          oportunidades = resultado_json.get("oportunidades", [])
+          if not oportunidades:
+            st.info(
+                "No se encontraron mercados con un +EV > 5%. Se recomienda"
+                " preservar el capital."
+            )
+          else:
+            for idx, op in enumerate(oportunidades, 1):
+              with st.expander(
+                  f"Oportunidad {idx}: {op.get('mercado')} (+{op.get('margen_ev')}%"
+                  " EV)"
+              ):
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Cuota", op.get("cuota"))
+                col2.metric("Probabilidad Real", f"{op.get('probabilidad_datos')}%")
+                col3.metric("Margen +EV", f"+{op.get('margen_ev')}%")
+
+                st.markdown("##### 📄 Evidencias (Datos Duros)")
+                st.markdown(f"- {op.get('evidencia_1')}")
+                st.markdown(f"- {op.get('evidencia_2')}")
+                st.markdown(f"- {op.get('evidencia_3')}")
+
+                st.markdown("##### ⚠️ Regla Pre-Partido (Kill Switch)")
+                st.markdown(f"* **Validar si:** {op.get('validar_si')}")
+                st.markdown(f"* **Cancelar si:** {op.get('cancelar_si')}")
+
+        with tab2:
+          st.json(resultado_json.get("auditoria_9_categorias", {}))
+
+      except Exception as e:
+        st.error(f"Ocurrió un error al procesar con la IA: {e}")
