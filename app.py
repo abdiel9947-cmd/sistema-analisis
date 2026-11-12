@@ -118,7 +118,7 @@ if st.button("⚙️ EJECUTAR ANÁLISIS CUANTITATIVO", type="primary"):
                 }
                 
                 payload = {
-                    "model": "llama3-70b-8192",
+                    "model": "llama-3.1-70b-versatile",
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": f"--- DATOS DE ESTADÍSTICAS ---\n{stats_text}\n\n--- DATOS DE CUOTAS ---\n{odds_text}"}
