@@ -1,2 +1,7 @@
 streamlit
+pandas
+numpy
+scipy
 openai
+requests
+openpyxl
