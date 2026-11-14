@@ -116,7 +116,7 @@ if uploaded_excel is not None:
 # Parámetros configurables por el usuario para el modelo matemático
 st.subheader("⚙️ 2. Calibración del Modelo xG (Poisson)")
 col_p1, col_p2, col_p3 = st.columns(3)
-x স্থানীয় = col_p1.number_input(
+x_local = col_p1.number_input(
     "xG Esperado Local", min_value=0.1, max_value=5.0, value=1.49, step=0.05
 )
 x_visitante = col_p2.number_input(
@@ -240,7 +240,9 @@ if st.button("🚀 Ejecutar Motor Cuantitativo Institucional"):
             for idx, op in enumerate(oportunidades, 1):
               ev_val = op.get("margen_ev", 0)
               cuota_op = op.get("cuota", 1.0)
-              stake_sugerido = round(bankroll * (0.01 if ev_val < 5 else 0.02), 2)
+              stake_sugerido = round(
+                  bankroll * (0.01 if ev_val < 5 else 0.02), 2
+              )
 
               with st.expander(
                   f"Oportunidad {idx}: {op.get('mercado')} (+{ev_val}% EV)"
