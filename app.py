@@ -25,23 +25,49 @@ if not st.session_state.authenticated:
   st.stop()
 
 
-# --- FUNCIÓN DE CLIMA AUTOMÁTICO (Open-Meteo API - Búsqueda por Ciudad/Lugar) ---
+# --- FUNCIÓN DE CLIMA AUTOMÁTICO (Con Diccionario de Estadios y Fallback) ---
 def obtener_clima_estadio(nombre_estadio):
   try:
-    lugar_limpia = (
-        nombre_estadio.replace("Estadio", "")
-        .replace("Stadium", "")
-        .split("(")[0]
-        .strip()
-    )
-    if not lugar_limpia:
-      lugar_limpia = nombre_estadio
+    # Diccionario de respaldo para estadios clave en Colombia y evitar confusiones geográficas
+    diccionario_estadios = {
+        "alfonso lópez": "Bucaramanga",
+        "atanasio girardot": "Medellin",
+        "el campín": "Bogota",
+        "metropolitano": "Barranquilla",
+        "pascual guerrero": "Cali",
+        "palogrande": "Manizales",
+        "centenario": "Armenia",
+        "manuel murillo toro": "Ibagué",
+        "romelio martínez": "Barranquilla",
+    }
 
-    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={requests.utils.quote(lugar_limpia)}&count=1&language=es&format=json"
+    nombre_lower = nombre_estadio.lower().strip()
+    lugar_busqueda = None
+
+    for est, ciudad in diccionario_estadios.items():
+      if est in nombre_lower:
+        lugar_busqueda = ciudad
+        break
+
+    if not lugar_busqueda:
+      # Limpieza estándar si no está en el diccionario
+      lugar_busqueda = (
+          nombre_estadio.replace("Estadio", "")
+          .replace("Stadium", "")
+          .split("(")[0]
+          .strip()
+      )
+      if not lugar_busqueda:
+        lugar_busqueda = "Medellin"
+
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={requests.utils.quote(lugar_busqueda)}&count=1&language=es&format=json"
     geo_resp = requests.get(geo_url, timeout=5).json()
 
     if "results" not in geo_resp or not geo_resp["results"]:
-      geo_url_alt = f"https://geocoding-api.open-meteo.com/v1/search?name=Medellin&count=1&language=es&format=json"
+      # Fallback de seguridad definitivo
+      geo_url_alt = (
+          "https://geocoding-api.open-meteo.com/v1/search?name=Bucaramanga&count=1&language=es&format=json"
+      )
       geo_resp = requests.get(geo_url_alt, timeout=5).json()
 
     if "results" not in geo_resp or not geo_resp["results"]:
@@ -49,7 +75,7 @@ def obtener_clima_estadio(nombre_estadio):
 
     lat = geo_resp["results"][0]["latitude"]
     lon = geo_resp["results"][0]["longitude"]
-    nombre_lugar = geo_resp["results"][0].get("name", lugar_limpia)
+    nombre_lugar = geo_resp["results"][0].get("name", lugar_busqueda)
     pais = geo_resp["results"][0].get("country", "")
 
     weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&timezone=auto"
@@ -74,15 +100,15 @@ def obtener_clima_estadio(nombre_estadio):
 
 
 # --- 2. INTERFAZ PRINCIPAL ---
-st.title("📈 Sistema Cuantitativo de Apuestas Deportivas (+EV Multi-Casa)")
+st.title("📈 Sistema Cuantitativo de Apuestas Deportivas (+EV Blindado)")
 st.markdown(
-    "Motor cuantitativo optimizado con **gpt-4o** (Temperatura 0.1) para"
-    " procesar +550 datos y cuotas cruzadas de múltiples casas de apuestas."
+    "Motor cuantitativo optimizado con **gpt-4o** (Temperatura 0.1) y validación"
+    " matemática estricta."
 )
 
 texto_partido = st.text_area(
-    "Pega aquí todo el consolidado (FootyStats, StatsHub, y los bloques de"
-    " cuotas de Betano, Stake, Rushbet, etc.):",
+    "Pega aquí todo el consolidado de datos (FootyStats, StatsHub y cuotas de"
+    " casas de apuestas):",
     height=360,
     placeholder=(
         "Pega aquí las estadísticas macro, el árbitro y los bloques de cuotas..."
@@ -90,22 +116,25 @@ texto_partido = st.text_area(
 )
 
 SYSTEM_PROMPT = """
-Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant) de nivel institucional. Tu objetivo es cruzar más de 500 datos estadísticos con las cuotas reales de múltiples casas de apuestas (Betano, Stake, Rushbet, etc.) para detectar ineficiencias de mercado y oportunidades de Valor Esperado Positivo (+EV).
+Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant) de nivel institucional. Tu objetivo es cruzar rigurosamente las estadísticas macro con las cuotas reales de múltiples casas de apuestas para detectar ineficiencias matemáticas reales de Valor Esperado Positivo (+EV).
 
-Analiza rigurosamente:
+Analiza estrictamente:
 1. Datos meteorológicos automáticos integrados en el entorno.
-2. Estadísticas macro de FootyStats (xG, xGA, PPG, tendencias All/Home/Away, córners, tarjetas).
-3. Perfil del árbitro en StatsHub.
-4. Cuotas detalladas de todas las casas de apuestas provistas en el texto (Resultado, Más/Menos Goles, Ambos Marcan, Hándicaps, Córners, Tarjetas, Goleadores, etc.).
+2. Estadísticas macro de FootyStats (xG, xGA, PPG, tendencias All/Home/Away).
+3. Perfil disciplinario y arbitral de StatsHub.
+4. Cuotas detalladas de las casas de apuestas provistas en el texto.
 
 REGLAS DE ORO INQUEBRANTABLES:
-1. Cero Alucinaciones / Temperatura 0.1: Utiliza estrictamente los datos provistos. Si un dato no aparece, no lo inventes.
-2. Validación Bidireccional (Over / Under / Favorito / No Favorito): No te limites a buscar solo apuestas a favor. Si las estadísticas macro y el H2H indican una tendencia clara al Under (poca anotación) o a un hándicap en contra, evalúa y recomienda ese mercado si las matemáticas lo respaldan.
-3. Filtro +EV Escal citado: 
-   - Considera oportunidad con **Valor Moderado (+EV del 2.0% al 4.9%)** si la probabilidad calculada supera de forma razonable la probabilidad implícita de la cuota.
-   - Considera oportunidad con **Valor Alto (+EV > 5.0%)** si la discrepancia matemática es muy alta.
-   - Solo emite "NO APOSTAR" si absolutamente ningún mercado ofrece un +EV superior al 2.0%. Si hay valor, la lista 'oportunidades' debe llenarse con las mejores opciones encontradas entre todas las casas analizadas.
-4. Formato Estricto: Devuelve la respuesta ÚNICAMENTE en formato JSON válido con la estructura exacta solicitada.
+1. Cero Alucinaciones / Temperatura 0.1: Utiliza exclusivamente los datos provistos. Si un dato no aparece, descártalo.
+2. Fórmula Matemática Obligatoria de +EV: NO adivines ni estimes porcentajes. Tienes la obligación matemática de calcular el margen de valor usando la fórmula exacta:
+   [Margen +EV (%)] = ((Probabilidad Calculada * Cuota Vigente) - 1) * 100
+   Ejemplo: Si la probabilidad calculada es 0.60 (60%) y la cuota es 1.80: (0.60 * 1.80 - 1) * 100 = +8.0% de EV.
+3. Coherencia Cruzada de Apuestas: Bajo ninguna circunstancia recomiendes mercados mutuamente contradictorios en el mismo análisis (por ejemplo, no puedes recomendar un hándicap pesado como -1.5 y al mismo tiempo un 'Menos de 2.5 goles' a menos que el perfil exacto del partido lo justifique matemáticamente de forma impecable).
+4. Filtro de Umbral: 
+   - Valor Moderado: +EV del 2.0% al 4.9%.
+   - Valor Alto: +EV > 5.0%.
+   - Si ningún mercado supera el 2.0% real aplicando la fórmula, la lista 'oportunidades' debe ser obligatoriamente [] y el veredicto final "NO APOSTAR".
+5. Formato Estricto: Devuelve la respuesta ÚNICAMENTE en formato JSON válido con la estructura exacta solicitada.
 
 ESTRUCTURA JSON OBLIGATORIA:
 {
@@ -122,7 +151,7 @@ ESTRUCTURA JSON OBLIGATORIA:
   },
   "oportunidades": [
     {
-      "mercado": "Nombre exacto del mercado y casa de apuestas (ej. Menos de 2.5 Goles - Stake @2.05)",
+      "mercado": "Nombre exacto del mercado y casa (ej. Atlético Bucaramanga Más de 1.5 Goles - Betano @1.72)",
       "cuota": 0.0,
       "probabilidad_datos": 0.0,
       "margen_ev": 0.0,
@@ -138,13 +167,13 @@ ESTRUCTURA JSON OBLIGATORIA:
 }
 """
 
-if st.button("Ejecutar Análisis Cuantitativo Multi-Casa (GPT-4o)"):
+if st.button("Ejecutar Análisis Cuantitativo Blindado (GPT-4o)"):
   if not texto_partido.strip():
     st.warning("Por favor, pega los datos consolidados del partido.")
   else:
     with st.spinner(
-        "Extrayendo estadio, consultando clima y procesando más de 550 datos con"
-        " gpt-4o..."
+        "Extrayendo estadio, consultando clima exacto y procesando con"
+        " fórmulas matemáticas (gpt-4o)..."
     ):
       try:
         estadio_detectado = ""
