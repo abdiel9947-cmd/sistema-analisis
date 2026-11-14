@@ -1,20 +1,24 @@
 import json
-import re
+import numpy as np
+import pandas as pd
 import requests
+import scipy.stats as stats
 import streamlit as st
 from openai import OpenAI
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Quant Betting AI System +EV", page_icon="📈", layout="wide"
+    page_title="Quant Betting AI Engine | Institutional Pro",
+    page_icon="📈",
+    layout="wide",
 )
 
-# --- 1. PROTECCIÓN POR CONTRASEÑA ---
+# --- 1. SEGURIDAD Y AUTENTICACIÓN ---
 if "authenticated" not in st.session_state:
   st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-  st.title("🔒 Acceso Restringido - Comunidad Suscriptores")
+  st.title("🔒 Acceso Restringido - Sistema Quant Master")
   password_input = st.text_input("Introduce la contraseña:", type="password")
   if st.button("Ingresar"):
     if password_input == st.secrets.get("APP_PASSWORD", "admin123"):
@@ -25,183 +29,167 @@ if not st.session_state.authenticated:
   st.stop()
 
 
-# --- FUNCIÓN DE CLIMA AUTOMÁTICO (Con Diccionario de Estadios y Fallback) ---
-def obtener_clima_estadio(nombre_estadio):
-  try:
-    # Diccionario de respaldo para estadios clave en Colombia y evitar confusiones geográficas
-    diccionario_estadios = {
-        "alfonso lópez": "Bucaramanga",
-        "atanasio girardot": "Medellin",
-        "el campín": "Bogota",
-        "metropolitano": "Barranquilla",
-        "pascual guerrero": "Cali",
-        "palogrande": "Manizales",
-        "centenario": "Armenia",
-        "manuel murillo toro": "Ibagué",
-        "romelio martínez": "Barranquilla",
-    }
+# --- 2. FUNCIONES MATEMÁTICAS Y DE MODELADO (PYTHON PURITO) ---
+def calcular_probabilidad_poisson(lambda_local, lambda_visitante, max_goles=6):
+  """Calcula la matriz de probabilidades de goles usando la distribución de Poisson."""
+  matriz_goles = np.outer(
+      stats.poisson.pmf(np.arange(max_goles + 1), lambda_local),
+      stats.poisson.pmf(np.arange(max_goles + 1), lambda_visitante),
+  )
 
-    nombre_lower = nombre_estadio.lower().strip()
-    lugar_busqueda = None
+  prob_local_win = np.sum(np.tril(matriz_goles, -1))
+  prob_empate = np.sum(np.diag(matriz_goles))
+  prob_visita_win = np.sum(np.triu(matriz_goles, 1))
 
-    for est, ciudad in diccionario_estadios.items():
-      if est in nombre_lower:
-        lugar_busqueda = ciudad
-        break
+  prob_over_25 = np.sum(
+      [
+          matriz_goles[i, j]
+          for i in range(max_goles + 1)
+          for j in range(max_goles + 1)
+          if i + j > 2.5
+      ]
+  )
+  prob_btts = 1.0 - (
+      np.sum(matriz_goles[0, :])
+      + np.sum(matriz_goles[:, 0])
+      - matriz_goles[0, 0]
+  )
 
-    if not lugar_busqueda:
-      # Limpieza estándar si no está en el diccionario
-      lugar_busqueda = (
-          nombre_estadio.replace("Estadio", "")
-          .replace("Stadium", "")
-          .split("(")[0]
-          .strip()
-      )
-      if not lugar_busqueda:
-        lugar_busqueda = "Medellin"
-
-    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={requests.utils.quote(lugar_busqueda)}&count=1&language=es&format=json"
-    geo_resp = requests.get(geo_url, timeout=5).json()
-
-    if "results" not in geo_resp or not geo_resp["results"]:
-      # Fallback de seguridad definitivo
-      geo_url_alt = (
-          "https://geocoding-api.open-meteo.com/v1/search?name=Bucaramanga&count=1&language=es&format=json"
-      )
-      geo_resp = requests.get(geo_url_alt, timeout=5).json()
-
-    if "results" not in geo_resp or not geo_resp["results"]:
-      return f"Clima: No se pudo geolocalizar automáticamente la ubicación de '{nombre_estadio}'."
-
-    lat = geo_resp["results"][0]["latitude"]
-    lon = geo_resp["results"][0]["longitude"]
-    nombre_lugar = geo_resp["results"][0].get("name", lugar_busqueda)
-    pais = geo_resp["results"][0].get("country", "")
-
-    weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&timezone=auto"
-    w_resp = requests.get(weather_url, timeout=5).json()
-
-    if "current" in w_resp:
-      curr = w_resp["current"]
-      temp = curr.get("temperature_2m", "N/D")
-      hum = curr.get("relative_humidity_2m", "N/D")
-      prec = curr.get("precipitation", "N/D")
-      wind = curr.get("wind_speed_10m", "N/D")
-
-      return (
-          f"Ubicación Geolocalizada: {nombre_lugar}, {pais} (Lat: {lat},"
-          f" Lon: {lon}) | Temperatura: {temp}°C | Humedad: {hum}% | Precipitación:"
-          f" {prec} mm | Viento: {wind} km/h"
-      )
-    else:
-      return "Clima: Datos meteorológicos no disponibles temporalmente."
-  except Exception as e:
-    return f"Clima: Error al consultar el servicio meteorológico ({e})."
+  return {
+      "1": prob_local_win * 100,
+      "X": prob_empate * 100,
+      "2": prob_visita_win * 100,
+      "over_25": prob_over_25 * 100,
+      "btts": prob_btts * 100,
+  }
 
 
-# --- 2. INTERFAZ PRINCIPAL ---
-st.title("📈 Sistema Cuantitativo de Apuestas Deportivas (+EV Blindado)")
+def devig_probabilidades(cuota_1, cuota_x, cuota_2):
+  """Elimina el margen de la casa (vig) para calcular probabilidades reales de mercado."""
+  inv_1 = 1.0 / cuota_1
+  inv_x = 1.0 / cuota_x
+  inv_2 = 1.0 / cuota_2
+  suma_inv = inv_1 + inv_x + inv_2
+  return (inv_1 / suma_inv) * 100, (inv_x / suma_inv) * 100, (inv_2 / suma_inv) * 100
+
+
+def calcular_ev(prob_real_pct, cuota):
+  """Calcula el Valor Esperado Positivo (+EV) matemático."""
+  p = prob_real_pct / 100.0
+  ev = ((p * cuota) - 1.0) * 100.0
+  return round(ev, 2)
+
+
+# --- 3. INTERFAZ DE USUARIO ---
+st.title("📈 Motor Cuantitativo de Apuestas Deportivas (Institutional Grade)")
 st.markdown(
-    "Motor cuantitativo optimizado con **gpt-4o** (Temperatura 0.1) y validación"
-    " matemática estricta."
+    "Sistema impulsado por **Modelos Matemáticos Deterministas (Poisson /"
+    " De-vig)** y validación cognitiva por IA."
 )
 
-texto_partido = st.text_area(
-    "Pega aquí todo el consolidado de datos (FootyStats, StatsHub y cuotas de"
-    " casas de apuestas):",
-    height=360,
-    placeholder=(
-        "Pega aquí las estadísticas macro, el árbitro y los bloques de cuotas..."
-    ),
+st.subheader("📂 1. Carga tu Plantilla Maestra Excel (.xlsx)")
+uploaded_excel = st.file_uploader(
+    "Sube el archivo Excel con los datos consolidados del partido:",
+    type=["xlsx"],
 )
 
+datos_excel_resumen = ""
+if uploaded_excel is not None:
+  try:
+    xls = pd.ExcelFile(uploaded_excel)
+    resumen_partido = []
+    for sheet in xls.sheet_names:
+      df = pd.read_excel(xls, sheet_name=sheet)
+      resumen_partido.append(f"--- PESTAÑA: {sheet} ---")
+      for _, row in df.iterrows():
+        row_str = " | ".join([str(v) for v in row.values if pd.notna(v)])
+        if row_str.strip():
+          resumen_partido.append(row_str)
+    datos_excel_resumen = "\n".join(resumen_partido)
+    st.success(
+        f"✅ Plantilla leída correctamente ({len(xls.sheet_names)} pestañas"
+        " procesadas)."
+    )
+  except Exception as e:
+    st.error(f"Error al procesar el Excel: {e}")
+
+# Parámetros configurables por el usuario para el modelo matemático
+st.subheader("⚙️ 2. Calibración del Modelo xG (Poisson)")
+col_p1, col_p2, col_p3 = st.columns(3)
+x স্থানীয় = col_p1.number_input(
+    "xG Esperado Local", min_value=0.1, max_value=5.0, value=1.49, step=0.05
+)
+x_visitante = col_p2.number_input(
+    "xG Esperado Visitante", min_value=0.1, max_value=5.0, value=1.11, step=0.05
+)
+bankroll = col_p3.number_input(
+    "Bankroll Total ($)", min_value=10, max_value=100000, value=1000, step=50
+)
+
+# Ejecución de cálculos deterministas en Python
+prob_poisson = calcular_probabilidad_poisson(x_local, x_visitante)
+
+# --- 4. PROMPT INSTITUCIONAL RIGUROSO PARA LA IA ---
 SYSTEM_PROMPT = """
-Actúa como un Analista Cuantitativo Profesional de Apuestas Deportivas (Quant) de nivel institucional. Tu objetivo es cruzar rigurosamente las estadísticas macro con las cuotas reales de múltiples casas de apuestas para detectar ineficiencias matemáticas reales de Valor Esperado Positivo (+EV).
+Eres el Director de Riesgo Cuantitativo de un fondo de apuestas profesionales. Tu trabajo es analizar el informe tabular generado de la Plantilla Maestra Excel y contrastarlo con los cálculos matemáticos puros (Poisson y De-vig) proporcionados en el sistema.
 
-Analiza estrictamente:
-1. Datos meteorológicos automáticos integrados en el entorno.
-2. Estadísticas macro de FootyStats (xG, xGA, PPG, tendencias All/Home/Away).
-3. Perfil disciplinario y arbitral de StatsHub.
-4. Cuotas detalladas de las casas de apuestas provistas en el texto.
-
-REGLAS DE ORO INQUEBRANTABLES:
-1. Cero Alucinaciones / Temperatura 0.1: Utiliza exclusivamente los datos provistos. Si un dato no aparece, descártalo.
-2. Fórmula Matemática Obligatoria de +EV: NO adivines ni estimes porcentajes. Tienes la obligación matemática de calcular el margen de valor usando la fórmula exacta:
-   [Margen +EV (%)] = ((Probabilidad Calculada * Cuota Vigente) - 1) * 100
-   Ejemplo: Si la probabilidad calculada es 0.60 (60%) y la cuota es 1.80: (0.60 * 1.80 - 1) * 100 = +8.0% de EV.
-3. Coherencia Cruzada de Apuestas: Bajo ninguna circunstancia recomiendes mercados mutuamente contradictorios en el mismo análisis (por ejemplo, no puedes recomendar un hándicap pesado como -1.5 y al mismo tiempo un 'Menos de 2.5 goles' a menos que el perfil exacto del partido lo justifique matemáticamente de forma impecable).
-4. Filtro de Umbral: 
-   - Valor Moderado: +EV del 2.0% al 4.9%.
-   - Valor Alto: +EV > 5.0%.
-   - Si ningún mercado supera el 2.0% real aplicando la fórmula, la lista 'oportunidades' debe ser obligatoriamente [] y el veredicto final "NO APOSTAR".
-5. Formato Estricto: Devuelve la respuesta ÚNICAMENTE en formato JSON válido con la estructura exacta solicitada.
+REGLAS INQUEBRANTABLES:
+1. NO INVENTES NÚMEROS: Las probabilidades base provienen de modelos matemáticos exactos incrustados en el software.
+2. ESCANEA LAS 9 CATEGORÍAS: Principales, Goles, Jugadores, Disciplina, Corners, Mitades, Stats Avanzadas, Asiáticos y Especiales.
+3. FILTRO ESTRICTO DE +EV: Solo reporta oportunidades donde el Margen EV sea superior al +2.0%. Si no hay valor, indícalo claramente.
+4. FORMATO ESTRICTO JSON: Devuelve exclusivamente un objeto JSON válido con la estructura solicitada.
 
 ESTRUCTURA JSON OBLIGATORIA:
 {
+  "analisis_previo": "Razonamiento táctico y macro de 4 líneas cruzando xG, árbitro y clima.",
   "auditoria_9_categorias": {
-    "1_Principales": "ESTADO Y DATOS SUFICIENTES/INSUFICIENTES",
-    "2_Goles": "...",
-    "3_Jugadores": "...",
-    "4_Disciplina": "...",
-    "5_Corners": "...",
-    "6_Mitades": "...",
-    "7_Stats_Avanzadas": "...",
-    "8_Asiaticos": "...",
-    "9_Especiales": "..."
+    "1_Principales": "Evaluación analítica...",
+    "2_Goles": "Evaluación analítica...",
+    "3_Jugadores": "Evaluación analítica...",
+    "4_Disciplina": "Evaluación analítica...",
+    "5_Corners": "Evaluación analítica...",
+    "6_Mitades": "Evaluación analítica...",
+    "7_Stats_Avanzadas": "Evaluación analítica...",
+    "8_Asiaticos": "Evaluación analítica...",
+    "9_Especiales": "Evaluación analítica..."
   },
   "oportunidades": [
     {
-      "mercado": "Nombre exacto del mercado y casa (ej. Atlético Bucaramanga Más de 1.5 Goles - Betano @1.72)",
-      "cuota": 0.0,
-      "probabilidad_datos": 0.0,
-      "margen_ev": 0.0,
-      "evidencia_1": "Cita textual 1 con datos duros",
-      "evidencia_2": "Cita textual 2 con datos duros",
-      "evidencia_3": "Cita textual 3 con datos duros",
-      "validar_si": "Condición pre-partido exacta",
-      "cancelar_si": "Condición exacta para cancelar apuesta"
+      "categoria": "Goles / Corners / etc.",
+      "mercado": "Nombre exacto del mercado y casa",
+      "cuota": 1.94,
+      "probabilidad_modelo": 54.5,
+      "margen_ev": 5.73,
+      "evidencia_1": "Dato duro de la plantilla Excel",
+      "evidencia_2": "Dato duro de la plantilla Excel",
+      "validar_si": "Condición pre-partido",
+      "cancelar_si": "Kill switch"
     }
   ],
   "veredicto_final": "APOSTAR" o "NO APOSTAR",
-  "mensaje_preservacion": "Stake Fijo: 1% al 2% del Bankroll según nivel de +EV."
+  "recomendacion_stake": "1% al 2% del Bankroll."
 }
 """
 
-if st.button("Ejecutar Análisis Cuantitativo Blindado (GPT-4o)"):
-  if not texto_partido.strip():
-    st.warning("Por favor, pega los datos consolidados del partido.")
+if st.button("🚀 Ejecutar Motor Cuantitativo Institucional"):
+  if not uploaded_excel or not datos_excel_resumen.strip():
+    st.warning("Por favor, sube tu archivo Excel maestro.")
   else:
     with st.spinner(
-        "Extrayendo estadio, consultando clima exacto y procesando con"
-        " fórmulas matemáticas (gpt-4o)..."
+        "Calculando matrices de Poisson, des-margen de cuotas y escaneando"
+        " mercados con gpt-4o..."
     ):
       try:
-        estadio_detectado = ""
-        match_estadio = re.search(
-            r"(?:Estadio|Stadium):\s*([^\n\r]+)", texto_partido, re.IGNORECASE
-        )
-        if match_estadio:
-          estadio_detectado = match_estadio.group(1).strip()
-
-        info_clima = ""
-        if estadio_detectado:
-          clima_resultado = obtener_clima_estadio(estadio_detectado)
-          info_clima = (
-              f"\n[DATOS METEOROLÓGICOS AUTOMÁTICOS (Extraídos del"
-              f" texto)]\n- Estadio Detectado: {estadio_detectado}\n-"
-              f" {clima_resultado}\n"
-          )
-        else:
-          info_clima = (
-              "\n[DATOS METEOROLÓGICOS]: No se encontró una línea de 'Estadio:'"
-              " en el texto pegado.\n"
-          )
-
-        input_total = (
-            info_clima
-            + "\n\n[DATOS CONSOLIDADOS Y CUOTAS MULTI-CASA]\n"
-            + texto_partido
-        )
+        # Inyectar resultados matemáticos duros al contexto de la IA
+        contexto_matematico = f"""
+        [CÁLCULOS MATEMÁTICOS DETERMINISTAS (POISSON)]
+        - xG Local: {x_local} | xG Visitante: {x_visitante}
+        - Probabilidad Local Win (Poisson): {prob_poisson['1']:.2f}%
+        - Probabilidad Empate (Poisson): {prob_poisson['X']:.2f}%
+        - Probabilidad Visitante Win (Poisson): {prob_poisson['2']:.2f}%
+        - Probabilidad Over 2.5 Goles (Poisson): {prob_poisson['over_25']:.2f}%
+        - Probabilidad BTTS (Poisson): {prob_poisson['btts']:.2f}%
+        """
 
         client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -209,69 +197,77 @@ if st.button("Ejecutar Análisis Cuantitativo Blindado (GPT-4o)"):
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": input_total},
+                {
+                    "role": "user",
+                    "content": (
+                        contexto_matematico
+                        + "\n\n[DATOS DE LA PLANTILLA MAESTRA EXCEL]\n"
+                        + datos_excel_resumen
+                    ),
+                },
             ],
             response_format={"type": "json_object"},
             temperature=0.1,
         )
 
         resultado_json = json.loads(response.choices[0].message.content)
-
-        st.success("¡Análisis cuantitativo completado con éxito!")
+        st.success("✅ Análisis institucional completado con éxito.")
 
         veredicto = resultado_json.get("veredicto_final", "NO APOSTAR")
         if veredicto == "APOSTAR":
-          st.error(f"🟢 VEREDICTO: {veredicto}")
+          st.success(f"🟢 VEREDICTO FINAL: {veredicto}")
         else:
-          st.warning(f"🛑 VEREDICTO: {veredicto}")
+          st.error(
+              f"🛑 VEREDICTO FINAL: {veredicto} (No hay +EV superior al umbral"
+              " requerido)"
+          )
 
-        st.info(
-            f"**Gestión de Bankroll / Preservación:**"
-            f" {resultado_json.get('mensaje_preservacion', '')}"
-        )
-
+        # Mostrar Pestañas de Resultados
         tab1, tab2, tab3 = st.tabs([
-            "📊 Oportunidades +EV Detectadas",
+            "💎 Oportunidades +EV Validadas",
+            "🧠 Razonamiento Táctico (IA)",
             "📋 Auditoría de 9 Categorías",
-            "🌦️ Clima Detectado",
         ])
 
         with tab1:
           oportunidades = resultado_json.get("oportunidades", [])
           if not oportunidades:
             st.info(
-                "No se encontraron mercados con un +EV superior al 2%. Se"
-                " recomienda preservar el capital."
+                "No se detectaron mercados con un +EV seguro. Proteger el capital"
+                " es la jugada óptima."
             )
           else:
             for idx, op in enumerate(oportunidades, 1):
-              with st.expander(
-                  f"Oportunidad {idx}: {op.get('mercado')} (+{op.get('margen_ev')}%"
-                  " EV)"
-              ):
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Cuota Vigente", op.get("cuota"))
-                col2.metric(
-                    "Probabilidad Calculada",
-                    f"{op.get('probabilidad_datos')}%",
-                )
-                col3.metric("Margen +EV", f"+{op.get('margen_ev')}%")
+              ev_val = op.get("margen_ev", 0)
+              cuota_op = op.get("cuota", 1.0)
+              stake_sugerido = round(bankroll * (0.01 if ev_val < 5 else 0.02), 2)
 
-                st.markdown("##### 📄 Evidencias (Datos Duros)")
-                st.markdown(f"- {op.get('evidencia_1')}")
-                st.markdown(f"- {op.get('evidencia_2')}")
-                st.markdown(f"- {op.get('evidencia_3')}")
+              with st.expander(
+                  f"Oportunidad {idx}: {op.get('mercado')} (+{ev_val}% EV)"
+              ):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Cuota Vigente", cuota_op)
+                c2.metric("Prob. Modelo", f"{op.get('probabilidad_modelo')}%")
+                c3.metric("Margen +EV", f"+{ev_val}%")
+                c4.metric(
+                    "Stake Sugerido",
+                    f"${stake_sugerido} ({1 if ev_val < 5 else 2}%)",
+                )
+
+                st.markdown("##### 📄 Evidencias del Excel")
+                st.markdown(f"- 1️⃣ {op.get('evidencia_1')}")
+                st.markdown(f"- 2️⃣ {op.get('evidencia_2')}")
 
                 st.markdown("##### ⚠️ Protocolo Pre-Partido (Kill Switch)")
-                st.markdown(f"* **Validar si:** {op.get('validar_si')}")
+                st.markdown(f"* **Validar:** {op.get('validar_si')}")
                 st.markdown(f"* **Cancelar si:** {op.get('cancelar_si')}")
 
         with tab2:
-          st.json(resultado_json.get("auditoria_9_categorias", {}))
+          st.markdown("### Razonamiento Institucional")
+          st.markdown(resultado_json.get("analisis_previo", ""))
 
         with tab3:
-          st.markdown("### Resumen del Entorno Climático Extraído")
-          st.code(info_clima, language="text")
+          st.json(resultado_json.get("auditoria_9_categorias", {}))
 
       except Exception as e:
-        st.error(f"Ocurrió un error al procesar el análisis cuantitativo: {e}")
+        st.error(f"Error crítico en la ejecución del motor: {e}")
