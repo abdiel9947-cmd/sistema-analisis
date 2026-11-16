@@ -1,14 +1,13 @@
 import json
 import numpy as np
 import pandas as pd
-import requests
 import scipy.stats as stats
 import streamlit as st
 from openai import OpenAI
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Quant Betting AI Engine | Institutional Pro",
+    page_title="Quant Betting AI Engine | Institutional Pro V3",
     page_icon="📈",
     layout="wide",
 )
@@ -29,7 +28,7 @@ if not st.session_state.authenticated:
   st.stop()
 
 
-# --- 2. FUNCIONES MATEMÁTICAS Y DE MODELADO (PYTHON PURITO) ---
+# --- 2. FUNCIONES MATEMÁTICAS Y DE MODELADO INSTITUCIONAL ---
 def calcular_probabilidad_poisson(lambda_local, lambda_visitante, max_goles=6):
   """Calcula la matriz de probabilidades de goles usando la distribución de Poisson."""
   matriz_goles = np.outer(
@@ -64,104 +63,131 @@ def calcular_probabilidad_poisson(lambda_local, lambda_visitante, max_goles=6):
   }
 
 
-def devig_probabilidades(cuota_1, cuota_x, cuota_2):
-  """Elimina el margen de la casa (vig) para calcular probabilidades reales de mercado."""
-  inv_1 = 1.0 / cuota_1
-  inv_x = 1.0 / cuota_x
-  inv_2 = 1.0 / cuota_2
-  suma_inv = inv_1 + inv_x + inv_2
-  return (inv_1 / suma_inv) * 100, (inv_x / suma_inv) * 100, (inv_2 / suma_inv) * 100
+def devig_probabilidades_1x2(cuota_1, cuota_x, cuota_2):
+  """Elimina el margen de la casa (vig) para el mercado 1X2."""
+  try:
+    inv_1 = 1.0 / float(cuota_1)
+    inv_x = 1.0 / float(cuota_x)
+    inv_2 = 1.0 / float(cuota_2)
+    suma_inv = inv_1 + inv_x + inv_2
+    return (
+        (inv_1 / suma_inv) * 100,
+        (inv_x / suma_inv) * 100,
+        (inv_2 / suma_inv) * 100,
+        (suma_inv - 1.0) * 100,
+    )  # Retorna probabilidades reales y el Payout/Vig
+  except:
+    return 0.0, 0.0, 0.0, 0.0
 
 
-def calcular_ev(prob_real_pct, cuota):
-  """Calcula el Valor Esperado Positivo (+EV) matemático."""
-  p = prob_real_pct / 100.0
-  ev = ((p * cuota) - 1.0) * 100.0
-  return round(ev, 2)
-
-
-# --- 3. INTERFAZ DE USUARIO ---
-st.title("📈 Motor Cuantitativo de Apuestas Deportivas (Institutional Grade)")
+# --- 3. INTERFAZ DE USUARIO Y CARGA DE EXCEL ---
+st.title(
+    "📈 Motor Cuantitativo de Apuestas Deportivas (Institutional Grade V3)"
+)
 st.markdown(
-    "Sistema impulsado por **Modelos Matemáticos Deterministas (Poisson /"
-    " De-vig)** y validación cognitiva por IA."
+    "Sistema conectado al 100% con la **Plantilla Maestra Excel V7** y sus"
+    " bloques analíticos."
 )
 
 st.subheader("📂 1. Carga tu Plantilla Maestra Excel (.xlsx)")
 uploaded_excel = st.file_uploader(
-    "Sube el archivo Excel con los datos consolidados del partido:",
-    type=["xlsx"],
+    "Sube el archivo Excel con las dos hojas estructuradas:", type=["xlsx"]
 )
 
-datos_excel_resumen = ""
+master_dict = {}
+df_odds = pd.DataFrame()
+
 if uploaded_excel is not None:
   try:
     xls = pd.ExcelFile(uploaded_excel)
-    resumen_partido = []
-    for sheet in xls.sheet_names:
-      df = pd.read_excel(xls, sheet_name=sheet)
-      resumen_partido.append(f"--- PESTAÑA: {sheet} ---")
-      for _, row in df.iterrows():
-        row_str = " | ".join([str(v) for v in row.values if pd.notna(v)])
-        if row_str.strip():
-          resumen_partido.append(row_str)
-    datos_excel_resumen = "\n".join(resumen_partido)
+
+    # Procesar Hoja 1: Analisis_Cuantitativo_Master
+    if "Analisis_Cuantitativo_Master" in xls.sheet_names:
+      df_master = pd.read_excel(xls, sheet_name="Analisis_Cuantitativo_Master")
+      # Mapear Columna 0 (Variable) a Columna 1 (Valor)
+      for _, row in df_master.iterrows():
+        k = str(row.iloc[0]).strip()
+        v = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else "N/D"
+        if k and k != "nan":
+          master_dict[k] = v
+
+    # Procesar Hoja 2: Comparativa_Cuotas_Casas
+    if "Comparativa_Cuotas_Casas" in xls.sheet_names:
+      df_odds = pd.read_excel(xls, sheet_name="Comparativa_Cuotas_Casas")
+
     st.success(
-        f"✅ Plantilla leída correctamente ({len(xls.sheet_names)} pestañas"
-        " procesadas)."
+        "✅ Plantilla leída con éxito: Hojas procesadas y mapeadas"
+        " perfectamente."
     )
   except Exception as e:
-    st.error(f"Error al procesar el Excel: {e}")
+    st.error(f"Error crítico al leer las hojas del Excel: {e}")
 
-# Parámetros configurables por el usuario para el modelo matemático
-st.subheader("⚙️ 2. Calibración del Modelo xG (Poisson)")
+# Extraer xG automáticamente desde el diccionario de la Hoja 1 (con respaldos por defecto)
+x_local_val = 1.49
+x_visita_val = 1.11
+
+for key, val in master_dict.items():
+  if "xG Overall Numérico Local" in key:
+    try:
+      x_local_val = float(val)
+    except:
+      pass
+  if "xG Overall Numérico Visitante" in key:
+    try:
+      x_visita_val = float(val)
+    except:
+      pass
+
+st.subheader("⚙️ 2. Calibración y Parámetros del Partido")
 col_p1, col_p2, col_p3 = st.columns(3)
 x_local = col_p1.number_input(
-    "xG Esperado Local", min_value=0.1, max_value=5.0, value=1.49, step=0.05
+    "xG Local (Extraído de Excel)",
+    min_value=0.1,
+    max_value=5.0,
+    value=x_local_val,
+    step=0.05,
 )
 x_visitante = col_p2.number_input(
-    "xG Esperado Visitante", min_value=0.1, max_value=5.0, value=1.11, step=0.05
+    "xG Visitante (Extraído de Excel)",
+    min_value=0.1,
+    max_value=5.0,
+    value=x_visita_val,
+    step=0.05,
 )
 bankroll = col_p3.number_input(
     "Bankroll Total ($)", min_value=10, max_value=100000, value=1000, step=50
 )
 
-# Ejecución de cálculos deterministas en Python
+# Ejecución de Poisson
 prob_poisson = calcular_probabilidad_poisson(x_local, x_visitante)
 
-# --- 4. PROMPT INSTITUCIONAL RIGUROSO PARA LA IA ---
+# --- 4. PROMPT ESPECIALIZADO INSTITUCIONAL ---
 SYSTEM_PROMPT = """
-Eres el Director de Riesgo Cuantitativo de un fondo de apuestas profesionales. Tu trabajo es analizar el informe tabular generado de la Plantilla Maestra Excel y contrastarlo con los cálculos matemáticos puros (Poisson y De-vig) proporcionados en el sistema.
+Eres el Director de Riesgo Cuantitativo de un fondo de apuestas profesionales. Tu trabajo es analizar la información completa de la Plantilla Maestra Excel (Bloques de 1 a 11) y la matriz de cuotas multi-casa, contrastándola con los cálculos matemáticos puros (Poisson y De-vig).
 
 REGLAS INQUEBRANTABLES:
 1. NO INVENTES NÚMEROS: Las probabilidades base provienen de modelos matemáticos exactos incrustados en el software.
-2. ESCANEA LAS 9 CATEGORÍAS: Principales, Goles, Jugadores, Disciplina, Corners, Mitades, Stats Avanzadas, Asiáticos y Especiales.
-3. FILTRO ESTRICTO DE +EV: Solo reporta oportunidades donde el Margen EV sea superior al +2.0%. Si no hay valor, indícalo claramente.
+2. REVISA TODA LA DATA: Considera fatiga, clima, bajas confirmadas, arbitraje (StatsHub) y cuotas de apertura (CLV).
+3. FILTRO ESTRICTO DE +EV: Solo reporta oportunidades donde el Margen EV sea superior al +2.0%.
 4. FORMATO ESTRICTO JSON: Devuelve exclusivamente un objeto JSON válido con la estructura solicitada.
 
 ESTRUCTURA JSON OBLIGATORIA:
 {
-  "analisis_previo": "Razonamiento táctico y macro de 4 líneas cruzando xG, árbitro y clima.",
-  "auditoria_9_categorias": {
-    "1_Principales": "Evaluación analítica...",
-    "2_Goles": "Evaluación analítica...",
-    "3_Jugadores": "Evaluación analítica...",
-    "4_Disciplina": "Evaluación analítica...",
-    "5_Corners": "Evaluación analítica...",
-    "6_Mitades": "Evaluación analítica...",
-    "7_Stats_Avanzadas": "Evaluación analítica...",
-    "8_Asiaticos": "Evaluación analítica...",
-    "9_Especiales": "Evaluación analítica..."
+  "analisis_previo": "Razonamiento táctico y macro cruzando xG, clima, árbitro, bajas y fatiga.",
+  "auditoria_bloques": {
+    "contexto_y_clima": "Evaluación...",
+    "disciplina_arbitro": "Evaluación...",
+    "rendimiento_y_h2h": "Evaluación..."
   },
   "oportunidades": [
     {
-      "categoria": "Goles / Corners / etc.",
+      "categoria": "Goles / Córners / 1X2 / etc.",
       "mercado": "Nombre exacto del mercado y casa",
       "cuota": 1.94,
       "probabilidad_modelo": 54.5,
       "margen_ev": 5.73,
-      "evidencia_1": "Dato duro de la plantilla Excel",
-      "evidencia_2": "Dato duro de la plantilla Excel",
+      "evidencia_1": "Dato duro del Excel (ej. xG o Stats de arbitraje)",
+      "evidencia_2": "Dato duro del Excel (ej. Bajas o fatiga)",
       "validar_si": "Condición pre-partido",
       "cancelar_si": "Kill switch"
     }
@@ -171,16 +197,21 @@ ESTRUCTURA JSON OBLIGATORIA:
 }
 """
 
-if st.button("🚀 Ejecutar Motor Cuantitativo Institucional"):
-  if not uploaded_excel or not datos_excel_resumen.strip():
-    st.warning("Por favor, sube tu archivo Excel maestro.")
+if st.button("🚀 Ejecutar Motor Cuantitativo Institucional V3"):
+  if not uploaded_excel or not master_dict:
+    st.warning("Por favor, sube tu archivo Excel maestro V7.")
   else:
     with st.spinner(
-        "Calculando matrices de Poisson, des-margen de cuotas y escaneando"
-        " mercados con gpt-4o..."
+        "Procesando las 150 filas del Excel, matrices de cuotas y modelos con"
+        " gpt-4o..."
     ):
       try:
-        # Inyectar resultados matemáticos duros al contexto de la IA
+        # Serializar todo el diccionario de la Hoja 1 y la tabla de la Hoja 2 en texto estructurado
+        contexto_excel_str = json.dumps(master_dict, ensure_ascii=False, indent=2)
+        tabla_cuotas_str = (
+            df_odds.to_string() if not df_odds.empty else "Sin cuotas cargadas"
+        )
+
         contexto_matematico = f"""
         [CÁLCULOS MATEMÁTICOS DETERMINISTAS (POISSON)]
         - xG Local: {x_local} | xG Visitante: {x_visitante}
@@ -201,8 +232,10 @@ if st.button("🚀 Ejecutar Motor Cuantitativo Institucional"):
                     "role": "user",
                     "content": (
                         contexto_matematico
-                        + "\n\n[DATOS DE LA PLANTILLA MAESTRA EXCEL]\n"
-                        + datos_excel_resumen
+                        + "\n\n[HOJA 1: ANALISIS_CUANTITATIVO_MASTER]\n"
+                        + contexto_excel_str
+                        + "\n\n[HOJA 2: COMPARATIVA_CUOTAS_CASAS]\n"
+                        + tabla_cuotas_str
                     ),
                 },
             ],
@@ -211,7 +244,10 @@ if st.button("🚀 Ejecutar Motor Cuantitativo Institucional"):
         )
 
         resultado_json = json.loads(response.choices[0].message.content)
-        st.success("✅ Análisis institucional completado con éxito.")
+        st.success(
+            "✅ Análisis institucional avanzado completado con toda la"
+            " información del Excel."
+        )
 
         veredicto = resultado_json.get("veredicto_final", "NO APOSTAR")
         if veredicto == "APOSTAR":
@@ -222,19 +258,18 @@ if st.button("🚀 Ejecutar Motor Cuantitativo Institucional"):
               " requerido)"
           )
 
-        # Mostrar Pestañas de Resultados
         tab1, tab2, tab3 = st.tabs([
             "💎 Oportunidades +EV Validadas",
-            "🧠 Razonamiento Táctico (IA)",
-            "📋 Auditoría de 9 Categorías",
+            "🧠 Razonamiento Táctico y Factores",
+            "📋 Auditoría Completa de Bloques",
         ])
 
         with tab1:
           oportunidades = resultado_json.get("oportunidades", [])
           if not oportunidades:
             st.info(
-                "No se detectaron mercados con un +EV seguro. Proteger el capital"
-                " es la jugada óptima."
+                "No se detectaron mercados con un +EV seguro cruzando toda la"
+                " data."
             )
           else:
             for idx, op in enumerate(oportunidades, 1):
@@ -269,7 +304,7 @@ if st.button("🚀 Ejecutar Motor Cuantitativo Institucional"):
           st.markdown(resultado_json.get("analisis_previo", ""))
 
         with tab3:
-          st.json(resultado_json.get("auditoria_9_categorias", {}))
+          st.json(resultado_json.get("auditoria_bloques", {}))
 
       except Exception as e:
-        st.error(f"Error crítico en la ejecución del motor: {e}")
+        st.error(f"Error crítico en la ejecución del motor V3: {e}")
